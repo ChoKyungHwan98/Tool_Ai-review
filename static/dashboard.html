@@ -13,7 +13,6 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js" defer></script>
 <style>
 /* 스튜디오 공통 색·글자 (SHARED_PRODUCT_UI_GUIDELINE.md) */
 :root {
@@ -506,7 +505,7 @@ footer { display: none !important; }
 /* ── 분석 정밀도 슬라이더 ──────────────────────────────────────
        손잡이는 "오차범위"다. 표본 수는 전체 리뷰 수와 거의 무관하므로
        "전체의 몇 %"로 조절하게 만들면 통계적으로 틀린 도구가 된다. */
-.precision { margin: 0 0 24px; }
+.precision { margin: 0 0 12px; }
 .precision-top {
       display: flex;
       align-items: baseline;
@@ -515,21 +514,20 @@ footer { display: none !important; }
       margin-bottom: 14px;
     }
 .precision-label { font-size: 14px; font-weight: 600; color: var(--color-text-title); }
-.precision-badge { font-size: 13px; color: var(--color-text-sub); }
-.precision-badge b { font-size: 18px; color: var(--color-primary); font-weight: 700; }
-.precision-sub {
-      margin: -8px 0 14px;
-      font-size: 13px;
-      line-height: 1.6;
-      color: var(--color-text-sub);
-    }
-.precision-curve-wrap { margin-bottom: 4px; }
-.precision-curve { display: block; width: 100%; height: 72px; overflow: visible; }
-.precision-curve-area { fill: rgba(49, 130, 246, .10); }
-.precision-curve-line { fill: none; stroke: #3182F6; stroke-width: 2; vector-effect: non-scaling-stroke; }
-.precision-curve-mark { stroke: #3182F6; stroke-width: 1; stroke-dasharray: 3 3; opacity: .5; vector-effect: non-scaling-stroke; }
-.precision-curve-dot { fill: #fff; stroke: #3182F6; stroke-width: 2; }
-.precision-curve-caption { margin-top: 6px; font-size: 13px; color: var(--color-text-sub); }
+/* 오차범위: 고른 오차를 이 게임의 추천 비율에 얹어 범위로 보여준다 */
+.precision-range { margin-bottom: 14px; padding: 14px 16px; border-radius: 10px; background: #EAF2FE; }
+.precision-range-name { font-size: 13px; font-weight: 600; color: #1B64DA; }
+.precision-range-value { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 2px 0 0; font-size: 14px; color: var(--color-text-title); }
+.precision-range-value b { font-size: 24px; font-weight: 700; color: #1B64DA; font-variant-numeric: tabular-nums; }
+.precision-band { position: relative; height: 24px; margin-top: 8px; }
+.precision-band::before { content: ""; position: absolute; left: 0; right: 0; top: 8px; height: 8px; border-radius: 4px; background: #fff; }
+.precision-band i { position: absolute; top: 8px; height: 8px; border-radius: 4px; background: var(--color-primary); }
+.precision-band em { position: absolute; top: 3px; width: 2px; height: 18px; margin-left: -1px; background: var(--color-text-title); }
+.precision-scale { display: flex; justify-content: space-between; font-size: 13px; color: var(--color-text-sub); font-variant-numeric: tabular-nums; }
+/* 무작위가 아니거나 건수를 직접 정하면 오차범위를 말할 수 없다 */
+.precision-range.is-off { background: #F2F4F6; }
+.precision-range.is-off .precision-range-name, .precision-range.is-off .precision-range-value b { color: var(--color-text-sub); }
+.precision-range.is-off .precision-band, .precision-range.is-off .precision-scale { display: none; }
 .precision-slider {
       width: 100%;
       margin: 10px 0 6px;
@@ -643,8 +641,6 @@ body.no-analysis .hero { border-color: var(--color-border); }
       cursor: pointer;
     }
 .hero-cta:hover { background: var(--color-primary-hover); }
-/* 조회 전에는 곡선 위의 점과 보조선을 감춘다. */
-.precision-curve-dot.is-hidden, .precision-curve-mark.is-hidden { display: none; }
 /* Summary assets are scoped to the review diagnosis. */
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
   outline: 2px solid var(--color-primary);
@@ -656,16 +652,15 @@ body.no-analysis #ovBody { display: none; }
 /* ── 분석 시작 화면: 설정과 진행 ─────────────────────────────
    팝업이 아니라 본문 영역(사이드바 오른쪽)을 채우는 페이지다. 사이드바는 그대로 보이고,
    여백·배경은 다른 페이지 본문(main)과 같다. 넓은 화면에서는 왼쪽에 조건, 오른쪽에 수집량과 시작 버튼. */
-.run-modal { position:fixed; top:0; right:0; bottom:0; left:var(--studio-sidebar-width); z-index:9999; flex-direction:column; overflow-y:auto; box-sizing:border-box; padding:36px 40px 52px; background:var(--studio-canvas); scrollbar-gutter:stable; }
+.run-modal { position:fixed; top:0; right:0; bottom:0; left:var(--studio-sidebar-width); z-index:9999; flex-direction:column; overflow-y:auto; box-sizing:border-box; padding:28px 40px 28px; background:var(--studio-canvas); scrollbar-gutter:stable; }
 .run-dialog { width:100%; max-width:1120px; box-sizing:border-box; margin:0 auto; color:#494C57; font-variant-numeric:tabular-nums; }
 .run-title { margin:0 0 6px; font-size:24px; font-weight:700; letter-spacing:-.02em; color:#191F28; }
-.run-lead { margin:0 0 24px; font-size:14px; line-height:1.6; color:#60636F; }
-.run-field { margin:0 0 16px; padding:20px 22px; border:1px solid #E5E8EB; border-radius:16px; background:#fff; box-shadow:none; }
+.run-lead { margin:0 0 16px; font-size:14px; line-height:1.6; color:#60636F; }
+.run-field { margin:0 0 12px; padding:16px 20px; border:1px solid #E5E8EB; border-radius:16px; background:#fff; box-shadow:none; }
 #pipelineSetupForm { display:grid; grid-template-columns:minmax(0, 1fr) minmax(0, 1fr); column-gap:24px; align-items:start; }
 #pipelineSetupForm > .run-title, #pipelineSetupForm > .run-lead { grid-column:1 / -1; }
-#pipelineSetupForm > #precisionBlock { grid-column:2; grid-row:3 / span 3; }
-#pipelineSetupForm > .run-check { grid-column:2; grid-row:6; padding:0 4px; }
-#pipelineSetupForm > .run-actions { grid-column:2; grid-row:7; }
+/* 왼쪽 묶음(.run-main: 게임 · 범위 · 모델) 옆에 오른쪽 묶음(.run-side: 수집량 · 시작)을 둔다 */
+.run-side .run-check { padding:0 4px; }
 #pipelineProgressView { max-width:720px; margin:0 auto; padding:28px 28px 24px; border:1px solid #E5E8EB; border-radius:16px; background:#fff; box-shadow:none; }
 .run-label { display:block; margin:0 0 8px; font-size:14px; font-weight:700; color:#191B23; }
 .run-label small { margin-left:6px; font-size:13px; font-weight:500; color:#4E5968; }
@@ -682,18 +677,20 @@ body.no-analysis #ovBody { display: none; }
 .run-seg button:hover { color:#191F28; }
 .run-seg button[aria-checked="true"] { background:#fff; color:#191B23; font-weight:700; box-shadow:0 1px 2px rgba(20,27,38,.08); }
 .run-sub-select { width:100%; margin-top:8px; padding:11px 14px; }
-.run-scope { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; }
+.run-scope { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; margin-top:14px; }
 .run-scope .select, .run-scope .input { width:100%; padding:11px 14px; }
 .run-scope .input { margin-top:8px; }
 .run-scope .run-help { grid-column:1 / -1; }
 .run-model-row { margin-top:10px; }
 .run-model-row .input { flex:0 1 38%; }
-.run-budget { margin-top:16px; }
+.run-budget { display:grid; grid-template-columns:minmax(0,1fr) 120px; align-items:center; gap:12px; margin-top:12px; }
+.run-budget[hidden] { display:none; }   /* 무료 모델에서는 예산 칸을 감춘다 */
+.run-budget .run-label { margin:0; }
 .run-budget .input { width:100%; padding:11px 14px; }
-.run-check { display:flex; gap:10px; align-items:flex-start; margin:0 0 24px; font-size:13px; line-height:1.55; color:#4E5968; cursor:pointer; }
+.run-check { display:flex; gap:10px; align-items:flex-start; margin:4px 0 16px; font-size:13px; line-height:1.55; color:#4E5968; cursor:pointer; }
 .run-check input { width:18px; height:18px; margin:2px 0 0; accent-color:var(--color-primary); }
 .run-check b { display:block; font-size:14px; color:#191F28; }
-.run-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:8px; }
+.run-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; margin-top:8px; }
 .run-btn { border:0; border-radius:12px; padding:11px 18px; background:#191F28; color:#fff; font:inherit; font-size:14px; font-weight:700; cursor:pointer; white-space:nowrap; }
 .run-btn:disabled { opacity:.5; cursor:default; }
 .run-btn.is-primary { background:var(--color-primary); }
@@ -724,9 +721,39 @@ body.no-analysis #ovBody { display: none; }
 .run-steps .is-failed .run-step-detail { color:#D22030; font-weight:700; }
 .run-steps .is-failed .run-step-bar i { background:#D22030; }
 .run-note { margin:14px 0 8px; font-size:13px; line-height:1.6; color:#4E5968; }
+/* 멈췄을 때 남아 있는 것. 모르는 사이에 뒤에 쌓여 있지 않게 화면에 적는다 */
+.run-kept { margin:0 0 16px; padding:12px 14px; border-radius:10px; background:#EAF2FE; }
+.run-kept span { display:block; font-size:13px; font-weight:600; color:#1B64DA; }
+.run-kept b { display:block; margin-top:2px; font-size:15px; font-weight:600; color:#191F28; }
+.run-kept small { display:block; margin-top:2px; font-size:13px; line-height:1.55; color:#4E5968; }
+.run-leftover { grid-column:1 / -1; display:flex; flex-wrap:wrap; align-items:center; gap:8px 16px; margin:0 0 12px; padding:14px 18px; border:1px solid #C9DDFB; border-radius:16px; background:#EAF2FE; }
+.run-leftover[hidden], .run-kept[hidden] { display:none; }
+.run-leftover div { flex:1 1 280px; min-width:0; }
+.run-leftover b { display:block; font-size:15px; font-weight:600; color:#191F28; }
+.run-leftover small { display:block; margin-top:2px; font-size:13px; color:#4E5968; }
+.run-leftover .run-btn { padding:9px 14px; }
 .run-note.is-error { padding:12px 14px; border-radius:10px; background:#FFF0F1; color:#A1121F; }
 @keyframes run-spin { to { transform:rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .run-steps .is-now .run-step-mark { animation:none; border-color:var(--color-primary); } .run-total i, .run-step-bar i { transition:none; } }
+/* 화면이 낮으면(노트북) 설명 한 줄과 여백을 줄여 스크롤 없이 들어오게 한다 */
+@media (min-width: 961px) and (max-height: 860px) {
+  .run-modal { padding:12px 32px 12px; }
+  .run-title { margin-bottom:8px; font-size:20px; }
+  .run-lead { display:none; }
+  .run-field { margin-bottom:8px; padding:12px 16px; }
+  .run-label { margin-bottom:6px; }
+  .run-help { margin-top:6px; line-height:1.45; }
+  .run-seg button { padding:8px; }
+  .run-inline .input, .run-inline .select, .run-scope .select, .run-scope .input, .run-budget .input, .run-sub-select { padding:8px 12px; }
+  .run-game { margin-top:8px; padding:8px 12px; }
+  .run-scope, .run-budget, .run-model-row { margin-top:8px; }
+  .precision-top { margin-bottom:8px; }
+  .precision-range { margin-bottom:10px; padding:10px 14px; }
+  .precision-ends { margin-bottom:10px; }
+  .precision-readout { padding:10px 0; }
+  .precision-custom { margin-top:10px; padding-top:10px; }
+  .run-check { margin-bottom:10px; }
+}
 @media (max-width: 960px) {
   .run-modal { padding:24px 24px 32px; }
   #pipelineSetupForm { display:block; }
@@ -739,16 +766,17 @@ body.no-analysis #ovBody { display: none; }
   #pipelineProgressView { padding:22px 18px 18px; }
   .run-scope { grid-template-columns:1fr; }
   .run-scope > div + div { margin-top:12px; }
+  .run-budget { grid-template-columns:minmax(0,1fr); }
   .run-model-row { flex-direction:column; }
   .run-model-row .input { flex:none; }
   .run-seg button { font-size:13px; padding:10px 4px; }
 }
 </style>
-<link rel="stylesheet" href="/static/review-dashboard.css?v=20261003-statsfix4">
+<link rel="stylesheet" href="/static/review-dashboard.css?v=20261004-run14">
 <script src="/static/vendor/apexcharts.min.js?v=3.54.1"></script>
-<script src="/static/review-dashboard.js?v=20261003-statsfix4"></script>
-<link rel="stylesheet" href="/static/review-pages.css?v=20261003-statsfix4">
-<script src="/static/review-pages.js?v=20261003-statsfix4"></script>
+<script src="/static/review-dashboard.js?v=20261004-run14"></script>
+<link rel="stylesheet" href="/static/review-pages.css?v=20261004-run14">
+<script src="/static/review-pages.js?v=20261004-run14"></script>
 <style>
 /* 공용 글꼴. 설치된 Pretendard가 있으면 그걸 쓰고, 없으면 스튜디오에 넣어 둔 파일을 쓴다(SIL OFL 1.1). */
 @font-face {
@@ -905,6 +933,8 @@ body.no-analysis #ovBody { display: none; }
         <h2 class="run-title" id="runTitle">새 분석</h2>
         <p class="run-lead">Steam 리뷰를 모아 AI가 주제와 칭찬·불만으로 나눕니다. 사람이 고르는 것은 아래 항목뿐이고, 나머지는 설계한 규칙대로 자동으로 처리합니다.</p>
 
+        <div class="run-leftover" id="runLeftover" hidden></div>
+        <div class="run-main">
         <section class="run-field">
           <label class="run-label" for="modalAppId">게임</label>
           <div class="run-inline">
@@ -929,25 +959,24 @@ body.no-analysis #ovBody { display: none; }
             <option value="schinese">중국어 간체</option><option value="tchinese">중국어 번체</option>
           </select>
           <p class="run-help" id="runLangHelp"></p>
-        </section>
-
-        <section class="run-field run-scope">
-          <div>
-            <label class="run-label" for="modalPeriod">수집 기간</label>
-            <select id="modalPeriod" class="select" onchange="onModalPeriodChange()">
-              <option value="">전체 기간</option><option value="30">최근 30일</option>
-              <option value="90">최근 90일</option><option value="365">최근 1년</option>
-              <option value="date">날짜 지정</option>
-            </select>
-            <input id="modalSince" class="input" type="date" aria-label="수집 시작 날짜" hidden />
+          <div class="run-scope">
+            <div>
+              <label class="run-label" for="modalPeriod">수집 기간</label>
+              <select id="modalPeriod" class="select" onchange="onModalPeriodChange(); updatePrecision()">
+                <option value="">전체 기간</option><option value="30">최근 30일</option>
+                <option value="90">최근 90일</option><option value="365">최근 1년</option>
+                <option value="date">날짜 지정</option>
+              </select>
+              <input id="modalSince" class="input" type="date" aria-label="수집 시작 날짜" hidden />
+            </div>
+            <div>
+              <label class="run-label" for="modalSort">뽑는 방법</label>
+              <select id="modalSort" class="select" onchange="updatePrecision()">
+                <option value="random">무작위 (권장)</option><option value="recent">최신순</option><option value="helpful">공감순</option>
+              </select>
+            </div>
+            <p class="run-help">무작위는 기간 안의 리뷰를 끝까지 훑고 고르게 뽑습니다(리뷰 1만 건에 4분쯤). 최신순·공감순은 그 순서대로 앞에서부터 모으며, 공감순은 최근 1년까지만 됩니다.</p>
           </div>
-          <div>
-            <label class="run-label" for="modalSort">정렬</label>
-            <select id="modalSort" class="select" onchange="updatePrecision()">
-              <option value="recent">최신순</option><option value="helpful">공감순</option><option value="random">무작위</option>
-            </select>
-          </div>
-          <p class="run-help">업데이트 뒤 반응만 보려면 기간을, 많은 유저가 동의한 의견을 보려면 공감순을 고르세요. 무작위는 한쪽으로 기울지 않지만 몇 분 걸립니다. 공감순은 최근 1년까지만 기간을 걸 수 있습니다.</p>
         </section>
 
         <section class="run-field">
@@ -964,54 +993,51 @@ body.no-analysis #ovBody { display: none; }
           </div>
           <p class="run-help" id="modalModelInfo"></p>
           <div class="run-budget" id="runBudgetRow">
-            <label class="run-label" for="modalBudget">이번 분석 예산 상한 (달러)</label>
+            <label class="run-label" for="modalBudget">예산 상한 (달러) <small>넘을 것 같으면 요청 전에 멈춥니다</small></label>
             <input id="modalBudget" type="number" min="0.01" max="100" step="0.01" value="5" class="input" oninput="updatePrecision()" />
-            <p class="run-help">요청하기 전에 남은 예산을 확인하고, 넘을 것 같으면 멈춥니다.</p>
           </div>
         </section>
 
+        </div>
 
-        <!-- 수집량 -->
-        <section class="precision run-field" id="precisionBlock">
-          <div class="precision-top">
-            <span class="run-label">수집량</span>
-            <span class="precision-badge"><b id="precMargin">±5%</b></span>
-          </div>
-          <p class="precision-sub">읽을 리뷰 수를 정합니다.</p>
-          <div class="precision-curve-wrap">
-            <svg id="precCurve" class="precision-curve" viewBox="0 0 320 72" preserveAspectRatio="none" aria-hidden="true">
-              <path id="precCurveArea" class="precision-curve-area" d="" />
-              <path id="precCurveLine" class="precision-curve-line" d="" />
-              <line id="precCurveMark" class="precision-curve-mark" x1="0" y1="0" x2="0" y2="72" />
-              <circle id="precCurveDot" class="precision-curve-dot" cx="0" cy="0" r="4" />
-            </svg>
-            <div class="precision-curve-caption">필요 리뷰 수 · 세로축은 큰 수의 차이를 줄여 표시</div>
-          </div>
-          <input type="range" id="precSlider" class="precision-slider" min="0" max="10" step="1" value="4"
-                 oninput="updatePrecision()" aria-label="수집량 (목표 오차)" />
-          <div class="precision-ends"><span>대략적인 흐름만</span><span>세밀한 차이까지</span></div>
-          <div class="precision-readout">
-            <div class="precision-cell"><b id="precCount">—</b><small>읽을 리뷰</small></div>
-            <div class="precision-cell"><b id="precShare">—</b><small id="precShareLabel">전체 중</small></div>
-            <div class="precision-cell"><b id="precCost">—</b><small id="precCostLabel">예상 비용</small></div>
-          </div>
-          <p class="precision-note" id="precNote">게임을 먼저 조회하면 이 게임 기준으로 계산합니다.</p>
-          <label class="precision-custom">
-            <input type="checkbox" id="optCustom" onchange="updatePrecision()" />
-            <span>직접 지정</span>
-            <input type="number" id="modalCustomSize" value="1000" min="1" oninput="updatePrecision()" disabled aria-label="직접 지정한 리뷰 수" />
-            <span>건</span>
+        <!-- 오른쪽: 수집량 · 이어서 수집 · 시작 -->
+        <div class="run-side">
+          <section class="precision run-field" id="precisionBlock">
+            <div class="precision-top">
+              <span class="run-label">수집량</span>
+            </div>
+            <div class="precision-range" id="precRange">
+              <span class="precision-range-name">오차범위</span>
+              <p class="precision-range-value"><b id="precMargin">±5%p</b><span id="precExample">게임을 조회하면 이 게임의 추천 비율로 예시를 보여줍니다</span></p>
+              <div class="precision-band" id="precBandWrap" aria-hidden="true"><i id="precBand"></i><em id="precBandMark"></em></div>
+              <div class="precision-scale" id="precScale" aria-hidden="true"></div>
+            </div>
+            <input type="range" id="precSlider" class="precision-slider" min="0" max="10" step="1" value="4"
+                   oninput="updatePrecision()" aria-label="수집량 (목표 오차)" />
+            <div class="precision-ends"><span>대략적인 흐름만</span><span>세밀한 차이까지</span></div>
+            <div class="precision-readout">
+              <div class="precision-cell"><b id="precCount">—</b><small>읽을 리뷰</small></div>
+              <div class="precision-cell"><b id="precShare">—</b><small id="precShareLabel">전체에서</small></div>
+              <div class="precision-cell"><b id="precCost">—</b><small id="precCostLabel">예상 비용</small></div>
+            </div>
+            <p class="precision-note" id="precNote">게임을 먼저 조회하면 이 게임 기준으로 계산합니다.</p>
+            <label class="precision-custom">
+              <input type="checkbox" id="optCustom" onchange="updatePrecision()" />
+              <span>직접 지정</span>
+              <input type="number" id="modalCustomSize" value="1000" min="1" oninput="updatePrecision()" disabled aria-label="직접 지정한 리뷰 수" />
+              <span>건</span>
+            </label>
+          </section>
+
+          <label class="run-check">
+            <input type="checkbox" id="modalIncremental" />
+            <span><b>이전 분석에 이어서 추가 수집</b>이미 모은 리뷰는 그대로 두고 새 리뷰만 더해 분석합니다. 무작위로 뽑은 분석에는 이어 붙일 수 없습니다.</span>
           </label>
-        </section>
 
-        <label class="run-check">
-          <input type="checkbox" id="modalIncremental" />
-          <span><b>이전 분석에 이어서 추가 수집</b>이미 모은 리뷰는 그대로 두고 새 리뷰만 더해 분석합니다.</span>
-        </label>
-
-        <div class="run-actions">
-          <button type="button" class="run-btn is-quiet" onclick="closePipelineModal()">취소</button>
-          <button type="button" class="run-btn is-primary" onclick="executePipelineRun()">분석 시작</button>
+          <div class="run-actions">
+            <button type="button" class="run-btn is-quiet" onclick="closePipelineModal()">취소</button>
+            <button type="button" class="run-btn is-primary" onclick="executePipelineRun()">분석 시작</button>
+          </div>
         </div>
       </div>
 
@@ -1025,7 +1051,8 @@ body.no-analysis #ovBody { display: none; }
         <p class="run-meta"><span id="runPct">0%</span><span id="runElapsed"></span><span id="runEta"></span></p>
         <ol class="run-steps" id="runSteps"></ol>
         <p class="run-note" id="runNote"></p>
-        <div class="run-actions">
+        <div class="run-kept" id="runKept" hidden></div>
+        <div class="run-actions" id="runActions">
           <button type="button" class="run-btn is-quiet" onclick="closePipelineModal()">닫기</button>
         </div>
       </div>
@@ -1191,40 +1218,6 @@ function modalSinceDate() {
   return d.toISOString().slice(0, 10);
 }
 
-async function startAnalysis(appId, gameName) {
-  if (searchDropdown) { searchDropdown.remove(); searchDropdown = null; }
-  document.getElementById('searchInput').value = '';
-
-  try {
-    const r = await fetch('/api/games');
-    const data = await r.json();
-    const existing = (data.games || []).find(function(g) { return g.app_id === appId; });
-    if (existing) {
-      switchGame(appId);
-      return;
-    }
-  } catch(e) {}
-
-  alert('"' + gameName + '" (App ID: ' + appId + ') 분석을 시작합니다.\n\n파이프라인이 백그라운드에서 실행됩니다.');
-
-  try {
-    const r = await fetch('/pipeline/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ app_id: appId })
-    });
-    if (r.ok) {
-      const result = await r.json();
-      if (result.status === 'done') {
-        await loadGameTabs();
-        switchGame(appId);
-      }
-    }
-  } catch(e) {
-    console.error('Pipeline error:', e);
-  }
-}
-
 /* ============ 분석 전 상태 ============ */
 // 결과가 없을 때 숫자만 "—"로 남겨두면 고장난 화면처럼 보인다.
 // 무엇이 없고 무엇을 하면 되는지 한 문장으로 말한다.
@@ -1286,8 +1279,6 @@ function destroy(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]
 let V5 = null;
 function set(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }
 
-
-function escapeHtml(s) { return (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 /* ============ Reviews / Sample (static/review-pages.js) ============ */
 function renderReviews() { ReviewPages.renderReviews(DATA); }
@@ -1397,9 +1388,9 @@ function filterModalModels(preferred) {
 }
 
 // 무료 모델은 분당 요청 수에 묶인다. 요청 수와 걸리는 시간을 미리 보여준다.
-// 요청 수 = 주제 1 + 분류(15건씩) + 불만 원인(5건씩, 절반이 불만이라고 넉넉히) + 검증 30 + 요약 1, 재시도 10% 여유
+// 요청 수 = 주제 1 + 분류(15건씩) + 불만 원인(5건씩, 절반이 불만이라고 넉넉히) + 요약 1, 재시도 10% 여유
 function estimateRequests(n) {
-  return Math.ceil((1 + Math.ceil(n / 15) + Math.ceil(n * 0.5 / 5) + 30 + 1) * 1.1);
+  return Math.ceil((1 + Math.ceil(n / 15) + Math.ceil(n * 0.5 / 5) + 1) * 1.1);
 }
 function estimateFreeMinutes(n) {
   return Math.max(1, Math.ceil(estimateRequests(n) * 60 / Math.max(1, freeLimits.per_minute - 2) / 60));
@@ -1411,23 +1402,15 @@ function estimateFreeMinutes(n) {
 const PRECISION_STOPS = [10, 8, 7, 6, 5, 4, 3, 2.5, 2, 1.5, 1];
 let modalStats = null;
 
-// 백엔드 decide_sample_size와 같은 규칙으로 계산한다. 화면과 실제 수집량이 어긋나면 안 된다.
+// 눈금마다 모을 건수는 서버가 수집기와 같은 함수(sampling.plan_sample_size)로 계산해 내려준다.
+// 화면에서 식을 다시 쓰지 않는다. 다시 쓰면 반올림 하나로 화면과 실제 수집량이 어긋난다.
 function precisionPlan(marginPct) {
-  if (!modalStats || !modalStats.selected || !modalStats.selected.total) return null;
-  const N = modalStats.selected.total;
-  const z = 1.96;            // 95% 신뢰수준
-  const p = 0.5;             // 백엔드 파이프라인과 같은 보수적 가정
-  const e = marginPct / 100;
-  const n0 = (z * z * p * (1 - p)) / (e * e);
-  const cochran = Math.ceil(n0 / (1 + (n0 - 1) / N));
-  const negRate = modalStats.selected.negative / N;
-  const minNeg = modalStats.sample_design?.min_neg_required ?? 100;
-  const forNeg = negRate > 0 ? Math.ceil(minNeg / negRate) : cochran;
-  const actual = Math.min(Math.max(cochran, forNeg), N);
-  return { cochran: cochran, actual: actual, total: N, minNegDriven: forNeg > cochran };
+  const plan = modalStats?.plans?.find(p => p.margin === marginPct);
+  if (!plan) return null;
+  return { cochran: plan.cochran, actual: plan.actual, total: modalStats.selected.total, minNegDriven: plan.min_neg_driven };
 }
 
-// 비추천 최소 100건 조건이 지배하는 구간에서는 오차를 줄여도 수집량이 늘지 않는다.
+// 비추천 최소 건수 조건이 지배하는 구간에서는 오차를 줄여도 수집량이 늘지 않는다.
 // 즉 "공짜로 더 정밀해지는" 지점이 있다. 그게 진짜 가성비 지점이다.
 function precisionBestIndex() {
   const plans = PRECISION_STOPS.map(m => precisionPlan(m));
@@ -1454,33 +1437,29 @@ function precisionCostPerReview() {
   return (260 * model.input_cost + 230 * model.output_cost) / 1000000;
 }
 
-// 오차를 줄일수록 표본이 가파르게 늘어나는 것을 곡선으로 보여준다.
-function drawPrecisionCurve(index) {
-  const line = document.getElementById('precCurveLine');
-  const area = document.getElementById('precCurveArea');
-  const mark = document.getElementById('precCurveMark');
-  const dot = document.getElementById('precCurveDot');
-  const plans = PRECISION_STOPS.map(m => precisionPlan(m));
-  if (plans.some(p => p === null)) {
-    line.setAttribute('d', ''); area.setAttribute('d', '');
-    dot.classList.add('is-hidden'); mark.classList.add('is-hidden');
-    return;
-  }
-  dot.classList.remove('is-hidden'); mark.classList.remove('is-hidden');
-  const max = Math.max.apply(null, plans.map(p => p.actual));
-  const span = Math.max(1, Math.sqrt(max));
-  const pts = plans.map((p, i) => {
-    const x = (i / (PRECISION_STOPS.length - 1)) * 320;
-    const y = 68 - (Math.sqrt(p.actual) / span) * 60;
-    return [x, y];
-  });
-  const d = pts.map((pt, i) => (i === 0 ? 'M' : 'L') + pt[0].toFixed(1) + ' ' + pt[1].toFixed(1)).join(' ');
-  line.setAttribute('d', d);
-  area.setAttribute('d', d + ' L320 72 L0 72 Z');
-  const here = pts[index];
-  dot.setAttribute('cx', here[0]); dot.setAttribute('cy', here[1]);
-  mark.setAttribute('x1', here[0]); mark.setAttribute('x2', here[0]);
-  mark.setAttribute('y1', here[1]); mark.setAttribute('y2', 72);
+// 고른 오차를 이 게임의 추천 비율에 얹어 "이 범위 안"으로 보여준다. 무작위로 뽑을 때만 성립한다.
+function drawPrecisionRange(margin, usingCustom) {
+  const box = document.getElementById('precRange');
+  const example = document.getElementById('precExample');
+  const sortMode = document.getElementById('modalSort')?.value;
+  const rate = modalStats?.selected?.total ? Math.round(modalStats.selected.pos_rate) : null;
+  const off = usingCustom || sortMode !== 'random' || rate == null;
+  box.classList.toggle('is-off', off);
+  document.getElementById('precMargin').textContent = usingCustom ? '직접 지정' : '±' + margin + '%p';
+  if (rate == null) { example.textContent = '게임을 조회하면 이 게임의 추천 비율로 예시를 보여줍니다'; return; }
+  if (usingCustom) { example.textContent = '건수를 직접 정하면 오차범위를 따로 계산하지 않습니다'; return; }
+  if (sortMode !== 'random') { example.textContent = '최신순·공감순에서는 오차범위를 말할 수 없습니다'; return; }
+  const low = Math.max(0, rate - margin), high = Math.min(100, rate + margin);
+  const show = v => Number.isInteger(v) ? String(v) : v.toFixed(1);
+  example.textContent = '추천 ' + rate + '%로 나오면 실제는 ' + show(low) + '~' + show(high) + '%';
+  // 눈금: 추천 비율 근처 30%p 구간을 5 단위로 맞춰 보여준다
+  const start = Math.max(0, Math.min(70, Math.floor((rate - 15) / 5) * 5)), width = 30;
+  const at = v => (Math.max(start, Math.min(start + width, v)) - start) / width * 100;
+  const band = document.getElementById('precBand');
+  band.style.left = at(low) + '%';
+  band.style.width = (at(high) - at(low)) + '%';
+  document.getElementById('precBandMark').style.left = at(rate) + '%';
+  document.getElementById('precScale').innerHTML = [0, 10, 20, 30].map(step => '<span>' + (start + step) + '%</span>').join('');
 }
 
 function updatePrecision() {
@@ -1501,8 +1480,7 @@ function updatePrecision() {
   const costEl = document.getElementById('precCost');
   const noteEl = document.getElementById('precNote');
 
-  document.getElementById('precMargin').textContent = usingCustom ? '직접 지정' : '±' + margin + '%';
-  drawPrecisionCurve(index);
+  drawPrecisionRange(margin, usingCustom);
 
   if (!plan) {
     countEl.textContent = '—'; shareEl.textContent = '—'; costEl.textContent = '—';
@@ -1516,16 +1494,20 @@ function updatePrecision() {
     : plan.actual;
   const share = (n / plan.total) * 100;
   countEl.textContent = n.toLocaleString() + '건';
-  shareEl.textContent = (share < 0.1 ? share.toFixed(2) : share.toFixed(1)) + '%';
+  // "8.9%"보다 "100건 중 9건"이 바로 읽힌다. 1건이 안 되면 1,000건 기준으로 적는다.
+  shareEl.textContent = share >= 1 ? '100건 중 ' + Math.round(share) + '건' : '1,000건 중 ' + Math.max(1, Math.round(share * 10)) + '건';
   const free = modelTier === 'free';
-  costEl.textContent = free ? '약 ' + estimateFreeMinutes(n) + '분' : '$' + (n * precisionCostPerReview()).toFixed(2);
+  // 무작위는 기간 안의 리뷰를 끝까지 훑는다(100건에 2.2초쯤). 전체 기간일 때만 건수를 알 수 있어 그때만 더한다.
+  const scans = document.getElementById('modalSort')?.value === 'random' && !document.getElementById('modalPeriod').value;
+  const scanMinutes = scans ? Math.ceil(Math.min(plan.total, 60000) / 100 * 2.2 / 60) : 0;
+  costEl.textContent = free ? '약 ' + (estimateFreeMinutes(n) + scanMinutes) + '분' : '$' + (n * precisionCostPerReview()).toFixed(2);
   document.getElementById('precCostLabel').textContent = free ? '예상 시간 (무료)' : '예상 비용';
   const requests = estimateRequests(n);
   const freeNote = !free ? '' : requests > freeLimits.per_day
-    ? '<br><b>AI 요청이 약 ' + requests.toLocaleString() + '회로 무료 하루 한도(' + freeLimits.per_day.toLocaleString() + '회)를 넘습니다.</b> 오늘은 중간까지 분석하고, 내일 다시 실행하면 이어서 합니다.'
-    : '<br>AI 요청 약 ' + requests.toLocaleString() + '회 · 무료 하루 한도 ' + freeLimits.per_day.toLocaleString() + '회 안에 들어갑니다.';
+    ? '<br><b>AI에 ' + requests.toLocaleString() + '번쯤 물어봐야 해서 무료 한도(하루 ' + freeLimits.per_day.toLocaleString() + '번)를 넘습니다.</b> 오늘은 중간까지 하고, 내일 다시 실행하면 이어서 합니다.'
+    : '<br>AI에 ' + requests.toLocaleString() + '번쯤 물어봅니다. 무료 한도(하루 ' + freeLimits.per_day.toLocaleString() + '번) 안입니다.';
 
-  document.getElementById('precShareLabel').textContent = '전체 ' + plan.total.toLocaleString() + '건 중';
+  document.getElementById('precShareLabel').textContent = '전체 ' + plan.total.toLocaleString() + '건에서';
 
   if (usingCustom) {
     noteEl.className = 'precision-note';
@@ -1537,27 +1519,26 @@ function updatePrecision() {
   noteEl.className = 'precision-note';
 
   // 먼저 ±X%가 무슨 뜻인지 예시로 말한다. 용어만 던지면 아무도 모른다.
-  const digits = margin % 1 === 0 ? 0 : 1;
-  const low = Math.max(0, 93 - margin).toFixed(digits);
-  const high = Math.min(100, 93 + margin).toFixed(digits);
   const sortMode = document.getElementById('modalSort')?.value;
   let note = sortMode === 'random'
-    ? '<b>±' + margin + '%</b>는 수집 범위를 끝까지 확인하고 무작위로 뽑았을 때의 계획 기준입니다. 완료 후 조건을 다시 확인합니다.'
-    : '<b>±' + margin + '%</b>는 읽을 건수를 정하는 기준일 뿐입니다. 최신순·공감순 결과의 통계적 오차가 아닙니다.';
+    ? '국을 한 숟갈 떠서 간을 보는 것과 같습니다. 잘 저어서(무작위로) 뜨면 전부 먹어 보지 않아도 됩니다.'
+      + '<br>이만큼 뽑으면 추천 비율이 실제와 <b>' + margin + '%p 넘게 어긋날 일은 100번 중 5번</b>뿐입니다.'
+    : '최신순·공감순은 고르게 뽑는 방식이 아니라서 <b>±' + margin + '%</b>를 보장하지 못합니다. 여기서는 몇 건을 읽을지만 정합니다.';
+  note += '<br>여론조사에서 쓰는 표본 크기 공식(코크란)으로 계산했습니다.';
 
   if (plan.minNegDriven) {
-    note += '<br>왼쪽이 평평한 이유: 비추천 리뷰 최소 100건 조건이 먼저 수집량을 결정합니다.';
+    note += '<br>비추천 리뷰가 ' + (modalStats.min_neg ?? 100) + '건쯤은 들어와야 해서, 손잡이를 왼쪽으로 옮겨도 건수가 줄지 않습니다.';
   }
   if (next && next.actual > plan.actual) {
     const times = next.actual / plan.actual;
     note += times >= 1.1
-      ? '<br>한 칸 더 정확하게(±' + PRECISION_STOPS[index + 1] + '%) 가려면 <b>' + times.toFixed(1) + '배</b>인 ' + next.actual.toLocaleString() + '건을 읽어야 합니다.'
-      : '<br>한 칸 더 정확하게(±' + PRECISION_STOPS[index + 1] + '%) 가도 ' + next.actual.toLocaleString() + '건으로 거의 같습니다.';
+      ? '<br>한 칸 더 가면(±' + PRECISION_STOPS[index + 1] + '%) <b>' + times.toFixed(1) + '배</b>인 ' + next.actual.toLocaleString() + '건을 읽어야 합니다.'
+      : '<br>한 칸 더 가도(±' + PRECISION_STOPS[index + 1] + '%) ' + next.actual.toLocaleString() + '건이라 거의 차이가 없습니다.';
   }
-  if (index >= 7) note += '<br>오른쪽이 가팔라지는 이유: 단순 무작위 표본에서는 목표 오차를 절반으로 줄일 때 필요한 리뷰가 대략 4배가 됩니다.';
+  if (index >= 7) note += '<br>오차를 절반으로 줄이려면 리뷰는 4배쯤 필요합니다. 그래서 오른쪽 끝으로 갈수록 건수가 빠르게 늡니다.';
   const best = precisionBestIndex();
   if (best > index) {
-    note += '<br><b>돈을 더 쓰지 않고 ±' + PRECISION_STOPS[best] + '%까지 갈 수 있습니다.</b>'
+    note += '<br><b>같은 건수로 ±' + PRECISION_STOPS[best] + '%까지 갈 수 있습니다.</b>'
       + ' <button type="button" class="precision-snap" onclick="snapToPrecisionSweetSpot()">여기로 맞추기</button>';
   }
   noteEl.innerHTML = note + freeNote;
@@ -1683,6 +1664,7 @@ async function fetchGameStatsForModal() {
     // 손잡이가 이 게임 기준으로 실시간 계산하도록 통계를 보관한다
     modalStats = data;
     snapToPrecisionSweetSpot();
+    showLeftover(appId);
     
   } catch (e) {
     alert(e.message);
@@ -1707,6 +1689,11 @@ async function startNewAnalysis(appId, s5, s3, isIncremental = false) {
   // 수집량은 fetchGameStatsForModal이 정밀도 손잡이로 다시 계산한다
   document.getElementById('optCustom').checked = false;
   document.getElementById('precSlider').value = 4;
+  // 이어서 수집은 이전 분석과 같은 방법으로만 할 수 있다. 새 분석은 무작위가 기본이다.
+  const previousSort = DATA?.sample_design_full?.params?.sort || 'recent';
+  document.getElementById('modalSort').value = isIncremental ? previousSort : 'random';
+  // 무작위로 뽑은 분석에는 이어 붙일 수 없다. 같은 리뷰로 다시 분석하는 쪽으로 연다(빠진 글과 바뀐 방식만 다시 한다).
+  if (isIncremental && previousSort === 'random') document.getElementById('modalIncremental').checked = false;
 
   setLanguageMode(languageMode, true);
   await loadModalModels();
@@ -1745,6 +1732,7 @@ async function executePipelineRun() {
   const since = modalSinceDate();
   const sort = document.getElementById('modalSort').value;
   if (document.getElementById('modalPeriod').value === 'date' && !since) { alert('수집 시작 날짜를 고르세요.'); return; }
+  if (incremental && sort === 'random') { alert('무작위로 뽑는 분석은 이전 분석에 이어 붙일 수 없습니다. "이어서 추가 수집"을 끄거나 뽑는 방법을 바꾸세요.'); return; }
   const language = currentLanguage();
   const free = modelTier === 'free';
   const budget = free ? 5 : Number(document.getElementById('modalBudget').value);
@@ -1763,44 +1751,118 @@ async function executePipelineRun() {
   document.getElementById('pipelineSetupForm').style.display = 'none';
   document.getElementById('pipelineProgressView').style.display = 'block';
   
+  await postRun({
+    app_id: appId, lang: language, budget: budget, target_error_pct: targetErrorPct, custom_sample_size: customSampleSize,
+    incremental: incremental, model: model, since: since, sort: sort
+  }, document.getElementById('modalGameName').textContent);
+}
+
+// 분석을 시작하고 진행 화면으로 바꾼다. 새 분석과 "이어서 하기"가 같이 쓴다.
+async function postRun(body, gameName) {
+  document.getElementById('pipelineModal').style.display = 'flex';
+  document.getElementById('pipelineSetupForm').style.display = 'none';
+  document.getElementById('pipelineProgressView').style.display = 'block';
   try {
     const r = await fetch('/pipeline/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        app_id: appId,
-        lang: language,
-        budget: budget,
-        target_error_pct: targetErrorPct,
-        custom_sample_size: customSampleSize,
-        incremental: incremental,
-        model: model,
-        since: since,
-        sort: sort
-      })
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
     });
-    
     if (!r.ok) {
       const err = await r.json();
-      alert('파이프라인 실행 시작 오류: ' + (err.detail || r.statusText));
+      alert('분석을 시작하지 못했습니다: ' + (err.detail || r.statusText));
       closePipelineModal();
       return;
     }
-    
-    currentAppId = appId;
+    currentAppId = body.app_id;
     const pendingUrl = new URL(location.href);
     pendingUrl.searchParams.delete('new');
-    pendingUrl.searchParams.set('app_id', appId);
+    pendingUrl.searchParams.set('app_id', body.app_id);
     pendingUrl.searchParams.set('pending', '1');
     history.replaceState(null, '', pendingUrl);
-    document.getElementById('currentGameName').textContent = document.getElementById('modalGameName').textContent;
+    if (gameName) document.getElementById('currentGameName').textContent = gameName;
     document.getElementById('overviewTitle').textContent = '분석 중';
     setNoAnalysisState(true, '리뷰를 분석하고 있습니다', '완료되면 이 프로젝트의 결과가 표시됩니다.');
-    pollPipelineProgress(appId, true);
+    pollPipelineProgress(body.app_id, true);
   } catch (e) {
-    alert('파이프라인 서버 연결 실패: ' + e.message);
+    alert('분석 서버에 연결하지 못했습니다: ' + e.message);
     closePipelineModal();
   }
+}
+
+/* ── 멈춘 분석: 남아 있는 것을 알리고, 이어서 할지 지울지는 사람이 버튼으로 정한다 ── */
+let lastRun = null;   // 마지막으로 읽은 실행 기록 (설정과 남아 있는 것)
+
+// 남아 있는 것 한 줄과, 이어서 하면 어디서부터 시작하는지
+function keptSummary(kept) {
+  const k = kept || {}, n = v => Number(v).toLocaleString();
+  const parts = [];
+  if (k.collected) parts.push('모은 리뷰 ' + n(k.collected) + '건');
+  else if (k.scanned) parts.push((k.scan_total ? '리뷰 ' + n(k.scan_total) + '건 중 ' : '리뷰 ') + n(k.scanned) + '건까지 받아 둠');
+  if (k.classified) parts.push('분류한 리뷰 ' + n(k.classified) + '건');
+  if (k.deep) parts.push('불만을 읽은 리뷰 ' + n(k.deep) + '건');
+  const next = !k.collected ? (k.scanned ? '이어서 하면 리뷰를 받은 데부터 이어서 모읍니다.' : '')
+    : !k.classified ? '이어서 하면 주제 찾기부터 시작합니다. 리뷰는 다시 모으지 않습니다.'
+    : '이어서 하면 남은 리뷰만 분석합니다. 리뷰는 다시 모으지 않습니다.';
+  return { text: parts.join(' · '), next: next };
+}
+const modelBusy = error => /모델이 지금 요청을 받아 주지 않습니다|하루 요청 한도/.test(error || '');
+
+// 같은 설정으로 멈춘 자리부터. 사람이 버튼을 눌렀을 때만 부른다.
+function resumeRun() {
+  const request = lastRun?.request;
+  if (!request?.app_id) { alert('지난 설정을 찾지 못했습니다. 새 분석으로 시작하세요.'); return; }
+  postRun({ ...request, incremental: false }, document.getElementById('runGameNow').textContent);
+}
+
+// 지난 설정을 그대로 채운 설정 화면을 연다. 모델만 바꿔 "분석 시작"을 누르면 이어서 한다.
+async function resumeWithAnotherModel() {
+  const request = lastRun?.request;
+  if (!request?.app_id) return;
+  clearInterval(pipelinePollInterval);
+  await startNewAnalysis(request.app_id, null, null, false);
+  setLanguageMode(['koreana', 'all'].includes(request.lang) ? request.lang : 'other', true);
+  if (languageMode === 'other') document.getElementById('modalLanguage').value = request.lang;
+  document.getElementById('modalSort').value = request.sort || 'recent';
+  document.getElementById('modalPeriod').value = request.since ? 'date' : '';
+  onModalPeriodChange();
+  if (request.since) document.getElementById('modalSince').value = request.since;
+  const stop = PRECISION_STOPS.indexOf(Number(request.target_error_pct));
+  document.getElementById('optCustom').checked = !!request.custom_sample_size;
+  if (request.custom_sample_size) document.getElementById('modalCustomSize').value = request.custom_sample_size;
+  await fetchGameStatsForModal();
+  if (stop >= 0 && !request.custom_sample_size) document.getElementById('precSlider').value = stop;   // 조회가 손잡이를 옮기므로 그 뒤에 맞춘다
+  updatePrecision();
+  document.getElementById('modalModel').focus();
+}
+
+// 남은 것을 휴지통으로 옮긴다
+async function discardRun(appId, after) {
+  if (!confirm('모아 둔 리뷰와 분석 기록을 지웁니다. 지운 것은 프로젝트 폴더의 휴지통(.review-trash)으로 옮겨집니다.')) return;
+  clearInterval(pipelinePollInterval);
+  try {
+    const r = await fetch('/api/games/' + encodeURIComponent(appId), { method: 'DELETE' });
+    if (!r.ok) { const err = await r.json().catch(() => ({})); alert(err.detail || '지우지 못했습니다.'); return; }
+  } catch (e) { alert('지우지 못했습니다: ' + e.message); return; }
+  if (after === 'stay') { document.getElementById('runLeftover').hidden = true; return; }
+  location.href = '/';
+}
+
+// 새 분석 화면에서 게임을 조회했을 때: 그 게임에 멈춘 분석이 남아 있으면 맨 위에 알린다
+async function showLeftover(appId) {
+  const box = document.getElementById('runLeftover');
+  box.hidden = true;
+  try {
+    const res = await fetch('/pipeline/result?app_id=' + appId).then(r => r.json());
+    if (res.status !== 'failed') return;
+    const kept = keptSummary(res.kept);
+    if (!kept.text) return;
+    lastRun = res;
+    const stage = RUN_STAGES.find(st => st.key === res.live?.progress?.stage);
+    const when = res.finished_at ? new Date(res.finished_at).toLocaleString('ko-KR', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+    box.innerHTML = '<div><b>지난번에 멈춘 분석이 남아 있습니다</b><small>' + [kept.text, stage ? stage.name + '에서 멈춤' : '', when].filter(Boolean).join(' · ') + '</small></div>'
+      + '<button type="button" class="run-btn is-quiet" onclick="discardRun(' + Number(appId) + ', \'stay\')">지우기</button>'
+      + '<button type="button" class="run-btn is-primary" onclick="resumeRun()">이어서 하기</button>';
+    box.hidden = false;
+  } catch (e) {}
 }
 
 // 분석 진행 화면. 서버의 progress.json(단계와 건수)을 1.5초마다 읽어 실제 건수로만 움직인다.
@@ -1859,11 +1921,26 @@ function renderRunProgress(res) {
 
   const title = document.getElementById('runHeadline');
   const note = document.getElementById('runNote');
+  const keptBox = document.getElementById('runKept');
+  const actions = document.getElementById('runActions');
   note.classList.toggle('is-error', failed);
+  keptBox.hidden = true;
+  actions.innerHTML = '<button type="button" class="run-btn is-quiet" onclick="closePipelineModal()">닫기</button>';
   if (failed) {
-    const reason = res.error || '멈춘 이유가 기록되지 않았습니다.';
+    lastRun = res;
+    const appId = Number(res.request?.app_id || currentAppId);
     title.textContent = '분석이 멈췄습니다';
-    note.textContent = reason.includes('이어서') ? reason : reason + ' 같은 설정으로 다시 실행하면 이미 분석한 리뷰는 건너뛰고 이어서 합니다.';
+    note.textContent = res.error || '멈춘 이유가 기록되지 않았습니다.';
+    const kept = keptSummary(res.kept);
+    if (kept.text) {
+      keptBox.innerHTML = '<span>여기까지 남아 있습니다</span><b>' + kept.text + '</b>' + (kept.next ? '<small>' + kept.next + '</small>' : '');
+      keptBox.hidden = false;
+    }
+    // 이어서 할지 지울지는 사람이 정한다. 프로그램이 알아서 다시 시작하지 않는다.
+    actions.innerHTML = (kept.text ? '<button type="button" class="run-btn is-quiet" onclick="discardRun(' + appId + ')">지우고 닫기</button>'
+                                   : '<button type="button" class="run-btn is-quiet" onclick="closePipelineModal()">닫기</button>')
+      + (modelBusy(res.error) ? '<button type="button" class="run-btn is-quiet" onclick="resumeWithAnotherModel()">모델 바꿔서 이어서 하기</button>' : '')
+      + (res.request?.app_id ? '<button type="button" class="run-btn is-primary" onclick="resumeRun()">' + (kept.text ? '이어서 하기' : '다시 시작') + '</button>' : '');
   } else if (done) {
     title.textContent = '분석을 마쳤습니다';
     note.textContent = '결과 화면을 여는 중입니다.';

@@ -27,7 +27,6 @@ class DesignApiTests(unittest.TestCase):
                     {"id": "2", "s": "N", "t": [["최적화", "N"], ["렉", "N"]]},
                     {"id": "3", "s": "N", "t": [["최적화", "N"], ["렉", "N"]]}]
         (self.folder / "analysis_v3.jsonl").write_text("\n".join(json.dumps(x, ensure_ascii=False) for x in analyses), encoding="utf-8")
-        (self.folder / "analysis_v3.csv").write_text("recommendationid,keywords\n1,렉@technical|최적화@technical\n", encoding="utf-8-sig")
         (self.folder / "insights_v5.json").write_text(json.dumps({
             "themes": [{"name": "렉", "desc": "끊김"}, {"name": "최적화", "desc": "성능"}],
             "actions": [{"theme": "렉", "prob": "끊김"}], "usage": {"model": "m"}}, ensure_ascii=False), encoding="utf-8")
@@ -44,11 +43,19 @@ class DesignApiTests(unittest.TestCase):
         self.assertEqual([t["name"] for t in data["evidence"]["themes"]], ["렉"])  # 같은 크기면 이름순으로 남긴다
         self.assertEqual([t["name"] for t in data["themes"]], ["렉"])
         self.assertEqual(data["actions"][0]["theme"], "렉")
-        self.assertEqual(data["reviews"][0]["keywords"], "렉@technical")
+        self.assertEqual(data["reviews"][0]["keywords"], "렉")
+        self.assertEqual(data["quality_report"]["dimensions"]["accuracy"]["analysis_completion_pct"], 100)   # 저장 파일 없이 바로 계산
+        self.assertNotIn("playtime", data)
         steps = {row["step"]: row for row in data["design_log"]}
         self.assertEqual(steps["주제 합치기"]["details"], ["최적화 → 렉 (겹침 100%)"])
         self.assertEqual(steps["강조한 주제"]["text"], "불만 최다 = 렉 (불만 3건)")
         self.assertNotIn("decisions", data)
+
+    def test_analysis_export_is_built_from_the_current_classification(self):
+        text = self.client.get("/api/analysis/download?app_id=7").content.decode("utf-8-sig")
+        rows = list(csv.DictReader(text.splitlines()))
+        self.assertEqual(len(rows), 3)
+        self.assertEqual((rows[0]["sentiment"], rows[0]["topics"]), ("NEGATIVE", "최적화:N|렉:N"))
 
     def test_manual_edit_endpoints_are_gone(self):
         self.assertEqual(self.client.post("/dashboard/topics", json={}).status_code, 404)

@@ -18,7 +18,6 @@ from token_budget import estimate_remaining
 
 
 class FakeConfig:
-    MIN_REVIEW_LEN = 8
     MODEL = "test-model"
     MODEL_COST_INPUT = 0.1
     MODEL_COST_OUTPUT = 0.4
@@ -83,7 +82,6 @@ class TokenOptimizationTests(unittest.TestCase):
         estimate = estimate_remaining(FakeConfig(self.folder))
         self.assertTrue(estimate["model_changed"])
         self.assertEqual(estimate["to_analyze"], 1)
-        self.assertTrue(estimate["needs_verify"])
 
     def test_incomplete_deep_batch_is_not_silent(self):
         rows = [{"recommendationid": str(i), "content": f"저장 오류가 {i}번째로 반복됩니다"} for i in (1, 2)]

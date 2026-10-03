@@ -10,7 +10,10 @@
 - 본 프로젝트는 교육·포트폴리오 목적으로 제작되었습니다.
 """
 
-import os, csv, json
+import csv
+import io
+import json
+import os
 import sys
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -20,12 +23,14 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from config import cfg
 from dashboard_evidence import build_evidence, evidence_page, load_sources, review_hours
 import analysis_design
+import quality_check
+import sampling
 import steam_histogram
 import progress
 
@@ -69,7 +74,7 @@ def root():
 
 
 # ====================================================================
-# 대시보드 (Tailwind + Chart.js 기반 웹 어플리케이션 UI)
+# 대시보드
 # ====================================================================
 
 # 정적 파일 마운트 (프로그램 폴더 안의 UI만 제공)
@@ -129,10 +134,14 @@ def trash_game(app_id: int):
     """
     games = _load_games()
     remaining = [game for game in games if str(game.get("app_id")) != str(app_id)]
-    if len(remaining) == len(games):
+    # 끝나지 못한 분석은 목록에 없지만 폴더에는 모은 리뷰가 남아 있다. 그것도 치울 수 있어야 한다.
+    source = os.path.join(cfg.PROJECTS_DIR, str(int(app_id)))
+    if len(remaining) == len(games) and not os.path.isdir(source):
         raise HTTPException(status_code=404, detail="해당 프로젝트를 찾지 못했습니다.")
+    import pipeline
+    if pipeline.RUNNING["app_id"] == app_id:
+        raise HTTPException(status_code=409, detail="지금 분석하고 있는 게임은 지울 수 없습니다. 분석이 끝나거나 멈춘 뒤에 지우세요.")
 
-    source = _game_dir(app_id)
     if os.path.isdir(source):
         trash_root = os.path.join(os.path.dirname(source), ".review-trash")
         os.makedirs(trash_root, exist_ok=True)
@@ -176,26 +185,17 @@ REVIEW_LANGUAGES = {"koreana", "english", "japanese", "schinese", "tchinese", "a
 @app.get("/api/games/review-stats", summary="Steam 리뷰 모집단 통계", include_in_schema=False)
 def review_population_stats(app_id: int, language: str = "koreana"):
     """Steam appreviews API로 선택한 언어의 리뷰 통계를 조회합니다."""
-    import httpx, math
+    import httpx
     if language not in REVIEW_LANGUAGES:
         raise HTTPException(status_code=422, detail="지원하지 않는 리뷰 언어입니다")
     url = f"https://store.steampowered.com/appreviews/{app_id}"
+    query = {"json": 1, "filter": "recent", "review_type": "all", "purchase_type": "all",
+             "num_per_page": 0, "filter_offtopic_activity": 0}
     try:
-        # 선택 언어의 리뷰 통계
-        r_kr = httpx.get(url, params={
-            "json": 1, "filter": "recent", "language": language,
-            "review_type": "all", "purchase_type": "all",
-            "num_per_page": 0, "filter_offtopic_activity": 0,
-        }, timeout=15.0)
+        r_kr = httpx.get(url, params={**query, "language": language}, timeout=15.0)   # 선택한 언어
         r_kr.raise_for_status()
         qs_kr = r_kr.json().get("query_summary", {})
-
-        # 전체 언어 리뷰 통계
-        r_all = httpx.get(url, params={
-            "json": 1, "filter": "recent", "language": "all",
-            "review_type": "all", "purchase_type": "all",
-            "num_per_page": 0, "filter_offtopic_activity": 0,
-        }, timeout=15.0)
+        r_all = httpx.get(url, params={**query, "language": "all"}, timeout=15.0)     # 모든 언어
         r_all.raise_for_status()
         qs_all = r_all.json().get("query_summary", {})
 
@@ -205,61 +205,23 @@ def review_population_stats(app_id: int, language: str = "koreana"):
         total_all = qs_all.get("total_reviews", 0)
         score = qs_all.get("review_score_desc", "")
 
-        # 수집기와 같은 보수적 p=0.5: 특정 게임의 추천율 외 다른 비율에도 적용할 계획 건수.
-        p_val = 0.5
-
-        neg_rate_raw = neg_kr / total_kr if total_kr > 0 else 0.5
-
-        def cochran_n(N, p=0.5, z=1.96, e=0.05):
-            n0 = (z**2 * p * (1-p)) / (e**2)
-            return math.ceil(n0 / (1 + (n0-1)/N)) if N > 0 else 0
-
-        MIN_NEG = cfg.MIN_NEG_REVIEWS
-
-        sample_5pct = cochran_n(total_kr, p=p_val, e=0.05) if total_kr > 0 else 0
-        sample_3pct = cochran_n(total_kr, p=p_val, e=0.03) if total_kr > 0 else 0
-
-        # 부정 리뷰 최소 100건 확보에 필요한 총 수집량
-        n_for_neg = math.ceil(MIN_NEG / neg_rate_raw) if neg_rate_raw > 0 else sample_5pct
-
-        # 실제 수집 목표: 두 조건 중 더 큰 값 (collect_reviews.decide_sample_size와 동일)
-        actual_5pct = min(max(sample_5pct, n_for_neg), total_kr)
-        actual_3pct = min(max(sample_3pct, n_for_neg), total_kr)
-
-        # 어떤 조건이 수집량을 결정했는지
-        driver_5 = "MIN_NEG" if n_for_neg > sample_5pct else "Cochran"
-        driver_3 = "MIN_NEG" if n_for_neg > sample_3pct else "Cochran"
-
+        # 손잡이 눈금마다 실제로 모을 건수. 수집기(collect_reviews.decide_sample_size)와 같은 함수로 계산한다.
+        plans = []
+        for margin in sampling.PRECISION_STOPS if total_kr else ():
+            plan = sampling.plan_sample_size(total_kr, neg_kr, margin, cfg.MIN_NEG_REVIEWS)
+            plans.append({"margin": margin, "cochran": plan["n_by_error"], "actual": plan["n_total"],
+                          "min_neg_driven": plan["min_neg_driven"]})
         return {
             "app_id": app_id,
-            "global": {
-                "total": total_all,
-                "score": score,
-            },
+            "language": language,
+            "global": {"total": total_all, "score": score},
             "selected": {
-                "total": total_kr,
-                "positive": pos_kr,
-                "negative": neg_kr,
+                "total": total_kr, "positive": pos_kr, "negative": neg_kr,
                 "pos_rate": round(pos_kr / total_kr * 100, 1) if total_kr > 0 else 0,
                 "neg_rate": round(neg_kr / total_kr * 100, 1) if total_kr > 0 else 0,
             },
-            "language": language,
-            "korean": {"total": total_kr, "positive": pos_kr, "negative": neg_kr,
-                       "pos_rate": round(pos_kr / total_kr * 100, 1) if total_kr else 0,
-                       "neg_rate": round(neg_kr / total_kr * 100, 1) if total_kr else 0} if language == "koreana" else None,
-            "sample_design": {
-                # Cochran 순수 통계 최솟값
-                "sample_5pct": actual_5pct,
-                "sample_3pct": actual_3pct,
-                "p_applied": round(p_val, 4),
-                # 실제 수집 결정 근거
-                "cochran_5pct": sample_5pct,
-                "cochran_3pct": sample_3pct,
-                "n_for_neg": n_for_neg,
-                "min_neg_required": MIN_NEG,
-                "driver_5pct": driver_5,
-                "driver_3pct": driver_3,
-            },
+            "min_neg": cfg.MIN_NEG_REVIEWS,
+            "plans": plans,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -300,31 +262,39 @@ def get_openrouter_models():
 
 
 @app.get("/api/reviews/download", summary="리뷰 CSV 다운로드", include_in_schema=False)
-def download_reviews_csv(app_id: int = None):
-    """수집된 리뷰 데이터를 CSV로 다운로드합니다."""
-    from fastapi.responses import FileResponse
-    import os
-    
-    csv_path = cfg.project_file("reviews.csv", app_id)
-    if not os.path.exists(csv_path):
+def download_reviews_csv(app_id: int = Query(..., gt=0)):
+    """수집한 리뷰 원문 파일을 그대로 내려준다."""
+    csv_path = _game_file(app_id, "reviews.csv")
+    if not csv_path:
         raise HTTPException(status_code=404, detail="리뷰 CSV 파일을 찾을 수 없습니다")
-    
-    filename = f"reviews_{app_id or 'all'}.csv"
-    return FileResponse(csv_path, media_type="text/csv", filename=filename)
+    return FileResponse(csv_path, media_type="text/csv", filename=f"reviews_{app_id}.csv")
 
 
 @app.get("/api/analysis/download", summary="분석 결과 CSV 다운로드", include_in_schema=False)
-def download_analysis_csv(app_id: int = None):
-    """AI 분석 결과를 CSV로 다운로드합니다."""
-    from fastapi.responses import FileResponse
-    import os
-    
-    csv_path = cfg.project_file("analysis_v3.csv", app_id)
-    if not os.path.exists(csv_path):
-        raise HTTPException(status_code=404, detail="분석 CSV 파일을 찾을 수 없습니다")
-    
-    filename = f"analysis_{app_id or 'all'}.csv"
-    return FileResponse(csv_path, media_type="text/csv", filename=filename)
+def download_analysis_csv(app_id: int = Query(..., gt=0)):
+    """AI 분류 결과를 표로 내려준다. 저장해 둔 파일이 아니라 지금의 분류(analysis_v3.jsonl)에서 만든다."""
+    path = _game_file(app_id, "analysis_v3.jsonl")
+    source = load_sources(os.path.dirname(path)) if path else None
+    if not source:
+        raise HTTPException(status_code=404, detail="분석 결과를 찾을 수 없습니다")
+    reviews, analyzed = source[:2]
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["recommendationid", "voted_up", "playtime_h", "sentiment", "fun", "topics", "key_phrase", "content"])
+    for rid, item in analyzed.items():
+        row = reviews[rid]
+        hours = review_hours(row)
+        topics = [f"{pair[0]}:{pair[1]}" for pair in item.get("t") or []
+                  if isinstance(pair, (list, tuple)) and len(pair) == 2]
+        writer.writerow([rid, row.get("voted_up", ""), "" if hours is None else round(hours, 1),
+                         SENTIMENT_NAMES.get(item.get("s"), "NEUTRAL"), "|".join(item.get("f") or []),
+                         "|".join(topics), item.get("k", ""), row.get("content", "")])
+    return Response("\ufeff" + buffer.getvalue(), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="analysis_{app_id}.csv"'})
+
+
+SENTIMENT_NAMES = {"P": "POSITIVE", "N": "NEGATIVE", "M": "MIXED", "U": "NEUTRAL"}
+
 
 @app.get("/dashboard/data/v5", summary="기획자용 결론 데이터", include_in_schema=False)
 def dashboard_data_v5(app_id: int = None):
@@ -339,83 +309,49 @@ def dashboard_data_v5(app_id: int = None):
     if not path or not os.path.exists(path):
         raise HTTPException(status_code=404, detail="insights_v5.json 없음 — 분석을 먼저 실행하세요")
     with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    # 이전 버전의 플레이 구간별 오차는 비무작위/가중 표본에 적용할 수 없으므로 노출하지 않는다.
-    for cohort in data.get("playtime", []):
-        cohort.pop("margin", None)
+        saved = json.load(f)
+    folder = os.path.dirname(path)
+    # 저장된 파일에서는 AI가 쓴 것(요약·할 일·주제 설명)만 읽는다. 건수와 점수는 지금 다시 센다.
+    data = {key: saved.get(key) for key in ("generated_at", "summary", "themes", "actions", "usage")}
     data["game"] = {
         "app_id": app_id,
         "name": (game_info.get("name_kr") or game_info.get("name")) if game_info else f"App {app_id}",
         "header_image": (game_info or {}).get("header_image", ""),
     }
-    data["evidence"] = build_evidence(os.path.dirname(path), app_id)
-    supporting_files = {
-        "sample_design_full": "sample_design.json",
-        "quality_report": "quality_report.json",
-    }
-    for key, filename in supporting_files.items():
-        source = _game_file(app_id, filename)
-        if source:
-            try:
-                with open(source, "r", encoding="utf-8") as stream:
-                    data[key] = json.load(stream)
-            except (OSError, ValueError):
-                data[key] = None
-        else:
-            data[key] = None
-    if data.get("quality_report"):
-        import quality_check
-        data["quality_report"] = quality_check.rescore(data["quality_report"])
-    data["reviews"] = review_rows(os.path.dirname(path))
+    data["evidence"] = build_evidence(folder, app_id)
+    data["sample_design_full"] = None
+    design_path = _game_file(app_id, "sample_design.json")
+    if design_path:
+        try:
+            with open(design_path, "r", encoding="utf-8") as stream:
+                data["sample_design_full"] = json.load(stream)
+        except (OSError, ValueError):
+            pass
+    data["quality_report"] = quality_check.run_quality_check(folder) if data["evidence"] else None
+    data["reviews"] = review_rows(folder)
     apply_design(data)
     return data
 
 
 def review_rows(directory):
-    """Build review cards from the same source files used for evidence.
-
-    The optional analysis_v3.csv can be absent after a resumed analysis and its
-    content column is truncated. reviews.csv keeps the complete original text.
-    """
+    """리뷰 원문 화면의 카드. 원문은 reviews.csv, 분류는 analysis_v3.jsonl에서 읽는다."""
     source = load_sources(directory)
     if not source:
         return []
     reviews, analyzed = source[:2]
-    sentiments = {"P": "POSITIVE", "N": "NEGATIVE", "M": "MIXED", "U": "NEUTRAL"}
-    area_names = {"graphics": "content", "gameplay": "content", "story": "content",
-                  "performance": "technical", "value": "value"}
-    areas = {}
-    themes_path = os.path.join(directory, "themes_v3.json")
-    if os.path.exists(themes_path):
-        with open(themes_path, encoding="utf-8") as stream:
-            areas = {theme["name"]: area_names.get(theme.get("area"), "content")
-                     for theme in json.load(stream) if theme.get("name")}
-    # Older projects may only have area tags in the optional analysis CSV.
-    legacy_tags = {}
-    analysis_path = os.path.join(directory, "analysis_v3.csv")
-    if os.path.exists(analysis_path):
-        with open(analysis_path, encoding="utf-8-sig", newline="") as stream:
-            legacy_tags = {row["recommendationid"]: row.get("keywords", "")
-                           for row in csv.DictReader(stream)}
     rows = []
     for rid, item in analyzed.items():
         original = reviews[rid]
         tags = [pair[0] for pair in item.get("t") or []
                 if isinstance(pair, (list, tuple)) and len(pair) == 2 and pair[0] != "기타"]
-        for tag in legacy_tags.get(rid, "").split("|"):
-            name, _, area = tag.partition("@")
-            if name and area:
-                areas.setdefault(name, area)
-        hours = review_hours(original)
         rows.append({
             "recommendationid": rid,
             "content": original.get("content", ""),
             "voted_up": original.get("voted_up", ""),
-            "playtime_h": hours,
-            "overall_sentiment": sentiments.get(item.get("s"), "NEUTRAL"),
+            "playtime_h": review_hours(original),
+            "overall_sentiment": SENTIMENT_NAMES.get(item.get("s"), "NEUTRAL"),
             "key_phrase": item.get("k", ""),
-            "keywords": "|".join(f"{name}@{areas[name]}" if name in areas else name
-                                  for name in dict.fromkeys(tags)),
+            "keywords": "|".join(dict.fromkeys(tags)),        # 주제 이름
             "language": original.get("language", ""),
             "helpful": original.get("votes_up", ""),          # 리뷰 원문 화면의 정렬에 쓴다
             "created": original.get("timestamp_created", ""),
@@ -442,13 +378,8 @@ def apply_design(data):
                 actions[name] = {**a, "theme": name}
         data["actions"] = list(actions.values())
         for row in data.get("reviews") or []:
-            tags = []
-            for tag in str(row.get("keywords") or "").split("|"):
-                name, _, area = tag.partition("@")
-                name = alias.get(name.strip(), name.strip())
-                if name and not any(t.startswith(name + "@") for t in tags):
-                    tags.append(f"{name}@{area}" if area else name)
-            row["keywords"] = "|".join(tags)
+            names = [alias.get(name, name) for name in str(row.get("keywords") or "").split("|") if name]
+            row["keywords"] = "|".join(dict.fromkeys(names))
     data["design_log"] = analysis_design.design_log(
         data.get("sample_design_full"), evidence.get("counts"), data.get("usage"),
         evidence.get("n_ai_topics", 0), evidence.get("merges") or [], evidence.get("themes") or [],
@@ -537,43 +468,30 @@ def trigger_pipeline(request: PipelineRunRequest, background_tasks: BackgroundTa
     return {"status": "started", "message": "파이프라인이 백그라운드에서 실행되었습니다."}
 
 
-@app.get(
-    "/pipeline/estimate",
-    summary="비용 사전 견적",
-    description="현재 리뷰 데이터 기준 LLM 분석 비용을 미리 계산합니다.",
-)
-def pipeline_estimate(app_id: int = None):
-    from token_budget import estimate_remaining
-    return estimate_remaining(cfg, app_id)
-
-
-@app.get(
-    "/pipeline/config",
-    summary="현재 설정 조회",
-    description="App ID, 모델, 예산 등 현재 파이프라인 설정을 반환합니다.",
-)
-def pipeline_config():
-    return {
-        **cfg.summary(),
-        "game_name": cfg.get_game_name(),
-        "budget_usd": cfg.BUDGET_USD,
-        "reviews_csv_exists": os.path.exists(cfg.REVIEWS_CSV),
-        "analysis_csv_exists": os.path.exists(cfg.ANALYSIS_CSV),
-        "insights_json_exists": os.path.exists(cfg.project_file("insights_v5.json")),
-    }
-
-
-def _count_csv_rows(path: str) -> int:
-    """CSV 데이터 행 수. 리뷰 본문에 줄바꿈이 있으므로 줄 수로 세면 안 된다."""
-    if not os.path.exists(path):
-        return 0
+def kept_work(folder):
+    """멈춘 분석이 폴더에 남겨 둔 것. 화면이 "여기까지 남아 있습니다"로 보여 준다."""
+    def lines(name):
+        try:
+            with open(os.path.join(folder, name), "r", encoding="utf-8") as stream:
+                return sum(1 for line in stream if line.strip())
+        except OSError:
+            return 0
     try:
-        with open(path, "r", encoding="utf-8-sig", newline="") as f:
-            reader = csv.reader(f)
-            next(reader, None)  # 헤더
-            return sum(1 for _ in reader)
-    except Exception:
-        return 0
+        with open(os.path.join(folder, "reviews.csv"), "r", encoding="utf-8-sig", newline="") as stream:
+            collected = max(0, sum(1 for _ in csv.reader(stream)) - 1)   # 머리줄 제외
+    except OSError:
+        collected = 0
+    kept = {"collected": collected,
+            "classified": lines("analysis_v3.jsonl"), "deep": lines("complaints_v3.jsonl"),
+            "themes": os.path.exists(os.path.join(folder, "themes_v3.json")), "scanned": 0, "scan_total": None}
+    if not kept["collected"]:
+        try:
+            with open(os.path.join(folder, "scan_state.json"), "r", encoding="utf-8") as stream:
+                kept["scanned"] = int(json.load(stream).get("count") or 0)
+            kept["scan_total"] = (progress.read(folder) or {}).get("total")
+        except (OSError, ValueError):
+            pass
+    return kept
 
 
 @app.get(
@@ -584,33 +502,13 @@ def _count_csv_rows(path: str) -> int:
 def pipeline_last_result(app_id: Optional[int] = None):
     # app_id를 주면 그 게임을 본다. 서버를 다시 켜면 cfg는 기본 게임을 가리키므로
     # 화면이 보고 있는 게임과 달라질 수 있다.
-    if app_id:
-        folder = cfg.project_dir(app_id)
-        result_path = os.path.join(folder, "pipeline_result.json")
-        analysis_csv = os.path.join(folder, "analysis_v3.csv")
-        reviews_csv = os.path.join(folder, "reviews.csv")
-    else:
-        result_path = cfg.PIPELINE_RESULT
-        analysis_csv = cfg.ANALYSIS_CSV
-        reviews_csv = cfg.REVIEWS_CSV
+    # 폴더를 만들지 않고 본다. 조회만으로 빈 프로젝트 폴더가 생기면 안 된다.
+    result_path = os.path.join(cfg.PROJECTS_DIR, str(int(app_id)), "pipeline_result.json") if app_id else cfg.PIPELINE_RESULT
 
     if not os.path.exists(result_path):
         return {"status": "no_runs", "message": "아직 파이프라인이 실행된 적 없습니다."}
     with open(result_path, "r", encoding="utf-8") as f:
         data = json.load(f)
-
-    # 분석 단계는 오래 걸린다. 지금 몇 건까지 했는지 보여줄 수 있어야
-    # 멈춘 것인지 도는 것인지 구분된다.
-    analyzed = _count_csv_rows(analysis_csv)
-    collected = _count_csv_rows(reviews_csv)
-
-    target = 0
-    steps = data.get("steps") or {}
-    cost = (steps.get("cost_estimate") or {}).get("detail") or {}
-    if isinstance(cost.get("n_reviews"), int):
-        target = cost["n_reviews"]
-    if not target:
-        target = collected
 
     elapsed = None
     started = data.get("started_at")
@@ -621,11 +519,13 @@ def pipeline_last_result(app_id: Optional[int] = None):
         except Exception:
             elapsed = None
 
+    # 기록은 "진행 중"인데 이 프로그램 안에서 돌고 있지 않으면, 프로그램이 꺼지면서 끊긴 것이다.
+    import pipeline
+    if data.get("status") == "running" and pipeline.RUNNING["app_id"] != (data.get("request") or {}).get("app_id", app_id):
+        data["status"] = "failed"
+        data["error"] = "프로그램이 꺼지면서 분석이 끊겼습니다."
+    data["kept"] = kept_work(os.path.dirname(result_path))
     data["live"] = {
-        "collected": collected,
-        "analyzed": analyzed,
-        "analyze_target": target,
-        "analyze_pct": round(analyzed / target * 100, 1) if target else 0.0,
         "elapsed_sec": elapsed,
         "progress": progress.read(os.path.dirname(result_path)),   # 단계별 건수
     }

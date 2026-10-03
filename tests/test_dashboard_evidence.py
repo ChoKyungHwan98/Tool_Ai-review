@@ -46,8 +46,8 @@ class DashboardEvidenceTests(unittest.TestCase):
         self.assertEqual(review_hours(self.rows[0]), 0)
         self.assertIsNone(review_hours(self.rows[2]))
         e = build_evidence(self.folder, 42)
-        self.assertEqual([c["n"] for c in e["cohorts"]], [1, 1, 0, 1])
-        self.assertEqual(e["counts"]["unknown_playtime"], 1)
+        self.assertEqual([c["n"] for c in e["cohorts"]], [1, 1, 0, 1])   # 시간을 모르는 한 건은 어느 구간에도 넣지 않는다
+        self.assertEqual(e["cohorts"][0]["top_neg"], [{"name": "건축", "count": 1}, {"name": "저장", "count": 1}])
 
     def test_even_sized_stage_uses_arithmetic_median(self):
         profile = stage_profile("all", "all", ["1", "2"], {r["recommendationid"]: r for r in self.rows})
@@ -66,6 +66,7 @@ class DashboardEvidenceTests(unittest.TestCase):
         self.assertEqual(cards[0]["playtime_h"], 0)
         self.assertEqual(cards[0]["overall_sentiment"], "MIXED")
         self.assertEqual(cards[0]["keywords"], "저장|건축")
+        self.assertEqual(cards[0]["playtime_h"], 0)
         self.assertEqual(cards[0]["language"], "koreana")
 
     def test_topic_counts_are_unique_and_distinct_from_recommendation(self):

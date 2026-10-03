@@ -2,18 +2,17 @@
 
 모든 게임에 같은 주제를 강제하지 않고 다음 세 단계로 분석한다.
 
-  A. 주제 찾기   리뷰 일부(최대 150건)로 이 게임에서 반복되는 주제 목록을 한 번 만든다.
+  A. 주제 찾기   리뷰를 세 묶음(각 최대 100건)으로 나눠 주제 후보를 찾고, 후보를 한 번 더 정리해 목록을 만든다.
   B. 전체 분류   모든 리뷰를 짧게 분류한다. 언급한 주제만 답하게 해 출력 토큰을 줄인다.
   C. 불만 심층   불만·섞임 리뷰만 문제 / 원인 / 유저 제안으로 나눈다.
 
-내용이 없는 짧은 리뷰는 AI에 보내지 않고, 짧은 불만은 선별해 분류한다.
+한 글자짜리처럼 내용이 없는 리뷰만 AI에 보내지 않는다.
 
 결과 파일
   themes_v3.json       A의 주제 목록
   analysis_v3.jsonl    B의 리뷰별 분류 (한 줄에 한 리뷰)
   complaints_v3.jsonl  C의 불만 분해
   usage_v3.json        단계별 실제 토큰 사용량
-  analysis_v3.csv      품질 점검·검증·리뷰 탐색이 읽는 분석 표
 """
 
 import asyncio
@@ -26,59 +25,43 @@ import sys
 
 import httpx
 from budget_control import BudgetExceeded, current as current_budget
-from dotenv import load_dotenv
 
 sys.stdout.reconfigure(encoding="utf-8")
-load_dotenv()
 from config import cfg
 import progress
 import openrouter_limits as limits
+from dashboard_evidence import FUN as FUN_TYPES   # MDA 프레임워크의 8가지 재미. 화면과 같은 목록을 쓴다
 
 API_KEY = cfg.OPENROUTER_API_KEY
 URL = cfg.OPENROUTER_URL
 
-ASPECTS = ["graphics", "gameplay", "story", "performance", "value"]
-AREA_TOPIC = {"graphics": "content", "gameplay": "content", "story": "content",
-              "performance": "technical", "value": "value"}
-
-# MDA 프레임워크의 8가지 재미를 한국어로 옮긴 것.
-FUN_TYPES = {
-    "감각": "보고 듣는 즐거움",
-    "판타지": "세계관과 역할에 몰입",
-    "이야기": "서사와 캐릭터",
-    "도전": "어려움을 이겨내는 성취",
-    "함께": "다른 유저와 협동·경쟁",
-    "발견": "탐험과 새로운 것 찾기",
-    "표현": "꾸미기·건축·창작",
-    "몰두": "시간 가는 줄 모르는 반복",
-}
-
-THEME_SAMPLE = 150       # A에서 읽을 리뷰 수
+THEME_VERSION = 2        # 주제 찾기 방식이 바뀌면 올린다. 예전 방식으로 만든 목록과 분류는 보관하고 다시 한다
+THEME_SAMPLES = 3        # A에서 서로 다른 리뷰 묶음으로 후보를 찾는 횟수. 묶음 하나에 치우친 주제가 목록을 흔들지 않게 한다
+THEME_SAMPLE = 100       # 묶음 하나에 담는 리뷰 수
+THEME_MAX = 14           # 최종 주제 수 상한 ("기타" 제외). 더 많으면 주제끼리 겹쳐 분류가 갈린다
+# 느낌이나 평가이지 게임의 구성 요소가 아닌 말. AI가 이런 이름을 내면 규칙으로 뺀다.
+FEELING_WORDS = ("시간", "재미", "몰입", "중독", "성취", "만족", "추천", "평가", "갓겜", "기대")
 BATCH_B = 15             # B 한 번에 담을 리뷰 수. 고정 지시문 비용을 더 많은 리뷰가 나눠 낸다
 BATCH_C = 5              # 심층 답변이 길어 JSON이 잘리지 않도록 작은 묶음 사용
 CONCURRENCY = 3
 CLIP_B = 480             # B에 보낼 본문 최대 글자 (앞부분 + 끝부분)
 CLIP_C = 720             # C에 보낼 본문 최대 글자 (앞부분 + 끝부분)
 MIN_LEN_C = 15           # 이보다 짧은 불만은 심층 분석할 내용이 없다
-SHORT_COMPLAINT_CUES = ("렉", "버그", "오류", "튕", "끊", "불편", "환불", "노잼",
-                        "lag", "bug", "crash", "error", "refund")
 
-SENT_MAP = {"P": "POSITIVE", "N": "NEGATIVE", "M": "MIXED", "U": "NEUTRAL"}
+BUSY_MESSAGE = ("'{model}' 모델이 지금 요청을 받아 주지 않습니다(이용자가 몰려 있음). 몇 분 뒤 다시 실행하거나 다른 모델을 고르세요. "
+                "모아 둔 리뷰와 이미 분석한 결과는 그대로 두고 이어서 분석합니다.")
 
 
 class FatalApiError(RuntimeError):
     """재시도해도 소용없는 오류 (모델 없음, 키 무효, 잔액 부족). 즉시 멈춘다."""
 
 
-def folder():
-    return os.path.dirname(cfg.ANALYSIS_CSV)
-
-
 def path(name):
-    return os.path.join(folder(), name)
+    return os.path.join(cfg.project_dir(), name)
 
 
 USAGE = {s: {"calls": 0, "input": 0, "output": 0} for s in ("A", "B", "C")}
+STAND_INS = {}   # 고른 모델이 붐벼서 대신 답한 모델 → 횟수
 
 
 def clean_json(text):
@@ -93,8 +76,9 @@ def clean_json(text):
 async def ask(client, stage, system, user, max_tokens):
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    max_tokens = limits.answer_room(max_tokens)
     body = {
-        "model": cfg.MODEL,
+        **limits.model_fields(),
         "messages": messages,
         "temperature": 0.2,
         "max_tokens": max_tokens,
@@ -115,8 +99,9 @@ async def ask(client, stage, system, user, max_tokens):
                     raise FatalApiError(limits.DAILY_MESSAGE)
                 rate_waits += 1
                 if rate_waits > 3:   # 실패한 429도 하루 한도에 들어가므로 오래 버티지 않는다
-                    raise RuntimeError(f"요청이 너무 많다는 응답(429)이 계속됩니다: {r.text[:120]}")
-                await asyncio.sleep(limits.retry_after(r, 10.0 if limits.is_free() else 5.0))
+                    raise RuntimeError(BUSY_MESSAGE.format(model=cfg.MODEL))
+                # 무료 모델은 여러 사람이 같이 써서 제공사 쪽이 붐비면 거절한다. 기다림을 15초, 30초, 60초로 늘려 가며 다시 묻는다.
+                await asyncio.sleep(limits.retry_after(r, 15.0 * 2 ** (rate_waits - 1) if limits.is_free() else 5.0))
                 continue
             if r.status_code in (400, 404) and body.pop("response_format", None):
                 raise ValueError("선택한 모델의 JSON 모드가 거부되어 일반 형식으로 재시도합니다")
@@ -129,13 +114,16 @@ async def ask(client, stage, system, user, max_tokens):
                 if isinstance(error, dict) and error.get("code") == 429:   # 본문에 담겨 오는 한도 초과
                     if limits.daily_limit_hit(str(error)):
                         raise FatalApiError(limits.DAILY_MESSAGE)
-                    raise RuntimeError(f"요청 한도 초과: {str(error)[:120]}")
+                    raise RuntimeError(BUSY_MESSAGE.format(model=cfg.MODEL))
                 raise FatalApiError(str(error)[:200])
             usage = data.get("usage") or {}
             if guard:
                 guard.finish(reservation, usage)
                 usage_recorded = True
             USAGE[stage]["calls"] += 1
+            answered = data.get("model")
+            if answered and answered != cfg.MODEL:      # 대신 답한 모델을 적어 둔다
+                STAND_INS[answered] = STAND_INS.get(answered, 0) + 1
             USAGE[stage]["input"] += int(usage.get("prompt_tokens") or 0)
             USAGE[stage]["output"] += int(usage.get("completion_tokens") or 0)
             content = data["choices"][0]["message"]["content"]
@@ -200,15 +188,6 @@ def should_classify(row):
     return len((row.get("content") or "").strip()) >= cfg.MIN_REVIEW_LEN
 
 
-def hours(row):
-    value = row.get("playtime_at_review_min")
-    try:
-        minutes = float(value) if value not in (None, "") else None
-    except (TypeError, ValueError):
-        minutes = None
-    return round(minutes / 60.0, 1) if minutes is not None and minutes >= 0 else None
-
-
 def read_jsonl(p):
     out = {}
     if os.path.exists(p):
@@ -228,16 +207,86 @@ SYSTEM_A = "게임 기획자를 돕는 리뷰 분석가입니다. JSON 객체만
 USER_A = """아래는 한 게임의 스팀 리뷰 {n}건입니다. 여러 언어가 섞일 수 있습니다. 주제 이름과 설명은 한국어로 쓰세요.
 {reviews}
 
-유저들이 반복해서 말하는 게임의 구성 요소를 8~14개로 정리하세요.
+유저들이 반복해서 말하는 게임의 구성 요소를 6~12개 찾으세요.
 - name: 이 게임에 맞는 구체적인 대상 이름, 한국어 2~6자.
-  좋은 예: "저장", "조작", "서버 동기화", "최적화", "인벤토리", "튜토리얼"
-  나쁜 예: "게임플레이"(너무 넓음), "멋진 캐릭터"(평가가 들어감), "성취감"·"시간 순삭"(느낌이지 대상이 아님),
-          "RPG"·"액션"(장르 이름), "최적화"와 "렉"을 따로(같은 것은 하나로)
+  좋은 예: "저장", "조작", "서버 동기화", "최적화", "인벤토리", "튜토리얼", "전투", "가격"
+  나쁜 예: "게임플레이"(너무 넓음), "멋진 캐릭터"(평가가 들어감), "RPG"·"액션"(장르 이름)
+- 느낌은 주제가 아닙니다. "시간 순삭", "몰입", "중독성", "재미", "성취감"은 넣지 마세요.
+  무엇이 그렇게 만들었는지(수집, 건축, 전투 등)가 주제입니다.
 - 좋다·나쁘다는 넣지 마세요. 같은 주제로 칭찬과 불만을 모두 담을 수 있어야 합니다.
-- desc: 15자 이내 설명
-- area: graphics|gameplay|story|performance|value 중 하나
-- 비슷한 주제는 하나로 합치세요.
-{{"items":[{{"name":"","desc":"","area":""}}]}}"""
+- 같은 문제를 가리키는 것은 하나로 합치세요. 예: 저장이 안 됨 = 세이브가 사라짐, 렉 = 최적화
+- desc: 이 주제에 무엇이 들어가는지 20자 이내, 평가 없이 중립으로. 리뷰를 분류할 때 이 설명으로 구분합니다.
+{{"items":[{{"name":"","desc":""}}]}}"""
+
+USER_A2 = """같은 게임의 리뷰를 여러 묶음으로 나눠 찾은 주제 후보입니다. seen은 그 후보가 나온 묶음 수입니다.
+{candidates}
+
+후보를 정리해 최종 주제를 8~{limit}개로 만드세요.
+- 같은 문제·같은 대상을 가리키는 후보는 하나로 합치세요.
+  예: "저장"과 "데이터 삭제"(둘 다 세이브가 사라지는 문제), "렉"과 "최적화", "팰"과 "팰 디자인"
+- 여러 묶음에서 나온 후보를 먼저 남기고, 한 묶음에만 나온 지엽적인 후보는 빼세요.
+- 게임의 구성 요소만 남기세요. 느낌·상태("시간 순삭", "몰입", "중독", "재미")와 장르 이름은 빼세요.
+- 주제끼리 범위가 겹치지 않게 하세요. 한 리뷰 문장이 두 주제에 똑같이 들어맞으면 둘을 합치거나 경계를 나누세요.
+  예: "팰"에 포획·육성을 넣었다면 "수집"을 따로 두지 않습니다.
+- name: 한국어 2~6자, 좋다·나쁘다 없이.
+- desc: 무엇이 들어가는지 20자 이내, 합친 후보를 포함해서. 칭찬과 불만을 모두 담도록 중립으로 쓰세요.
+  "부족", "불편", "문제", "멍청한" 같은 평가는 빼세요. 나쁜 예: "즐길 거리 부족" → 좋은 예: "즐길 거리의 양과 후반 진행"
+{{"items":[{{"name":"","desc":""}}]}}"""
+
+
+def themes_are_current(themes):
+    """지금 방식(THEME_VERSION)으로 만든 주제 목록인가. 빈 목록은 아직 만들지 않은 것으로 본다."""
+    return all(isinstance(t, dict) and t.get("v") == THEME_VERSION for t in themes or [])
+
+
+def theme_guide(themes):
+    """분류 지시문에 넣는 주제 목록. 설명을 같이 줘야 낱말만 같은 다른 뜻("거점 최적화")을 가려낸다."""
+    return "; ".join(f"{t['name']}: {t['desc']}" if t.get("desc") else t["name"] for t in themes)
+
+
+def theme_samples(rows):
+    """주제 후보를 찾을 리뷰 묶음들. 묶음끼리 리뷰가 겹치지 않고, 묶음마다 비추천과 추천을 번갈아 담는다.
+
+    비추천은 전체의 몇 %뿐이라 비율대로 담으면 불만 주제를 놓친다. 그래서 묶음의 절반까지 비추천을 넣는다.
+    """
+    rng = random.Random(42)
+    is_down = lambda r: r["voted_up"] in ("0", "False", "false")
+    usable = [r for r in rows if len(r["content"]) >= 20]
+    negatives = [r for r in usable if is_down(r)]
+    positives = [r for r in usable if not is_down(r)]
+    rng.shuffle(negatives)
+    rng.shuffle(positives)
+    count = max(1, min(THEME_SAMPLES, len(usable) // 40))
+    byte_limit = min(27000, max(12000, int(getattr(cfg, "MODEL_CONTEXT_LENGTH", 32768)) - 5000))
+    samples = []
+    for index in range(count):
+        down, up = negatives[index::count], positives[index::count]
+        payload = []
+        for position in range(max(len(down), len(up))):
+            for vote, group in ((0, down), (1, up)):
+                if position >= len(group) or len(payload) >= THEME_SAMPLE:
+                    continue
+                candidate = {"up": vote, "t": group[position]["content"][:300]}
+                if len(compact(payload + [candidate]).encode("utf-8")) <= byte_limit:
+                    payload.append(candidate)
+        if payload:
+            samples.append(payload)
+    return samples
+
+
+def clean_themes(items):
+    """AI가 낸 주제에서 이름이 없거나, 겹치거나, 느낌을 가리키는 것을 뺀다."""
+    themes, seen = [], set()
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name", "")).strip()
+        key = "".join(name.split()).lower()
+        if not name or name == "기타" or key in seen or any(word in name for word in FEELING_WORDS):
+            continue
+        seen.add(key)
+        themes.append({"name": name, "desc": str(item.get("desc", "")).strip()[:30], "v": THEME_VERSION})
+    return themes
 
 
 async def find_themes(client, long_rows):
@@ -246,47 +295,32 @@ async def find_themes(client, long_rows):
     if os.path.exists(p):
         with open(p, "r", encoding="utf-8") as f:
             themes = json.load(f)
-        print(f"[A] 기존 주제 {len(themes)}개 사용")
-        return themes
+        if themes and themes_are_current(themes):
+            print(f"[A] 기존 주제 {len(themes)}개 사용")
+            return themes
 
-    rng = random.Random(42)
-    # 비추천도 추천과 같이 무작위로 고른다. 가장 긴 글만 고르면 길게 쓰는 사람의 주제만 목록에 오른다.
-    negatives = [r for r in long_rows if r["voted_up"] in ("0", "False", "false") and len(r["content"]) >= 20]
-    rng.shuffle(negatives)
-    negatives = negatives[:60]
-    positives = [r for r in long_rows if r["voted_up"] not in ("0", "False", "false") and len(r["content"]) >= 20]
-    rng.shuffle(positives)
-    # Keep both recommendation groups represented, and fit the chosen model's context.
-    interleaved = []
-    for index in range(max(len(negatives), len(positives))):
-        if index < len(negatives):
-            interleaved.append((0, negatives[index]))
-        if index < len(positives):
-            interleaved.append((1, positives[index]))
-    # Use the same evidence allowance across free and paid models for comparable results.
-    byte_limit = min(27000, max(12000, int(getattr(cfg, "MODEL_CONTEXT_LENGTH", 32768)) - 5000))
-    payload = []
-    for up, row in interleaved:
-        if len(payload) >= THEME_SAMPLE:
-            break
-        candidate = {"up": up, "t": row["content"][:300]}
-        if len(compact(payload + [candidate]).encode("utf-8")) > byte_limit:
-            break
-        payload.append(candidate)
+    samples = theme_samples(long_rows)
+    print(f"[A] 리뷰 {sum(map(len, samples))}건을 {len(samples)}묶음으로 나눠 주제 후보를 찾습니다")
+    sem = asyncio.Semaphore(limits.concurrency(CONCURRENCY))   # 무료 모델은 한 번에 하나씩
 
-    print(f"[A] 리뷰 {len(payload)}건으로 주제를 찾습니다")
-    result = await ask(client, "A", SYSTEM_A, USER_A.format(n=len(payload), reviews=compact(payload)), 1500)
-    themes, seen = [], set()
-    for t in result:
-        name = str(t.get("name", "")).strip()
-        area = t.get("area") if t.get("area") in ASPECTS else "gameplay"
-        if name and name not in seen:
-            seen.add(name)
-            themes.append({"name": name, "desc": str(t.get("desc", ""))[:30], "area": area})
-    themes.append({"name": "기타", "desc": "목록에 없는 주제", "area": "gameplay"})
+    async def candidates_of(sample):
+        async with sem:
+            return await ask(client, "A", SYSTEM_A, USER_A.format(n=len(sample), reviews=compact(sample)), 1500)
+
+    found = await asyncio.gather(*(candidates_of(s) for s in samples))
+    # 후보마다 몇 묶음에서 나왔는지 센다. 여러 묶음에 나온 후보가 이 게임의 주제일 가능성이 높다.
+    candidates = {}
+    for items in found:
+        for theme in clean_themes(items):
+            entry = candidates.setdefault(theme["name"], {"name": theme["name"], "desc": theme["desc"], "seen": 0})
+            entry["seen"] += 1
+    ranked = sorted(candidates.values(), key=lambda c: (-c["seen"], c["name"]))
+    final = await ask(client, "A", SYSTEM_A, USER_A2.format(candidates=compact(ranked), limit=THEME_MAX), 1500)
+    themes = clean_themes(final)[:THEME_MAX] or clean_themes(ranked)[:THEME_MAX]
+    themes.append({"name": "기타", "desc": "목록에 없는 주제", "v": THEME_VERSION})
     with open(p, "w", encoding="utf-8") as f:
         json.dump(themes, f, ensure_ascii=False, indent=2)
-    print(f"[A] 주제 {len(themes)}개: {', '.join(t['name'] for t in themes)}")
+    print(f"[A] 후보 {len(ranked)}개 → 주제 {len(themes)}개: {', '.join(t['name'] for t in themes)}")
     return themes
 
 
@@ -294,7 +328,7 @@ async def find_themes(client, long_rows):
 
 SYSTEM_B = "게임 리뷰 분류기입니다. JSON 객체만 출력합니다. 설명하지 않습니다."
 
-USER_B = """주제: {themes}
+USER_B = """주제 (이름: 무엇이 들어가는지): {themes}
 재미 종류: {fun}
 리뷰 원문은 여러 언어일 수 있습니다. k 요약은 한국어로 쓰세요.
 
@@ -304,8 +338,10 @@ USER_B = """주제: {themes}
 리뷰마다 한 항목씩 {{"items":[...]}} 형식의 JSON 객체로 답하세요.
 - s: P 긍정, N 부정, M 섞임, U 판단 불가
 - s와 주제별 P/N은 리뷰 문장으로 판단하세요. 추천 여부(up)만으로 감정을 정하지 마세요.
+  "시간이 사라진다", "잠을 못 잔다", "현생이 망한다"는 빠져들었다는 칭찬입니다 → P
 - f: 긍정·섞임 리뷰는 드러난 재미 종류를 1~2개 고르세요 (위 목록에서만). 근거가 전혀 없을 때만 []
-- t: 리뷰가 구체적인 대상을 말했을 때만 넣고, 주제별 P 또는 N.
+- t: 리뷰가 구체적인 대상을 말했을 때만 넣고, 주제별 P 또는 N. 주제 이름만 적으세요(설명은 빼고).
+  낱말이 같아도 설명과 뜻이 다르면 넣지 마세요. 예: "거점을 최적화"는 성능 얘기가 아닙니다.
   "재밌다", "갓겜" 같은 막연한 말은 주제가 아닙니다 → []
   구체적인 대상인데 목록에 없을 때만 "기타"
 - k: 유저 입장 한 줄, 20자 이내
@@ -321,65 +357,22 @@ USER_B = """주제: {themes}
 → {{"id":"4","s":"N","f":[],"t":[["최적화","N"]],"k":"실행 즉시 튕김"}}"""
 
 
-def clean_tags(raw, area_of):
+def clean_tags(raw, names):
     """[["주제","P"], ...]만 남긴다. AI가 형식을 틀리게 주는 경우가 있다."""
     tags = []
     for pair in raw or []:
-        if (isinstance(pair, list) and len(pair) == 2 and isinstance(pair[0], str)
-                and pair[0] in area_of and pair[1] in ("P", "N")):
-            tags.append([pair[0], pair[1]])
+        if not (isinstance(pair, list) and len(pair) == 2 and isinstance(pair[0], str)):
+            continue
+        name = pair[0] if pair[0] in names else pair[0].split(":")[0].strip()   # "이름: 설명"으로 답한 경우
+        if name in names and pair[1] in ("P", "N") and [name, pair[1]] not in tags:
+            tags.append([name, pair[1]])
     return tags
-
-
-def analysis_row(src, res, area_of):
-    """대시보드와 검증 도구가 읽는 분석 표 한 줄을 추가 호출 없이 만든다."""
-    per_area = {a: [] for a in ASPECTS}
-    tags = clean_tags(res.get("t"), area_of)
-    for pair in tags:
-        per_area[area_of[pair[0]]].append(pair)
-    row = {
-        "recommendationid": src["recommendationid"],
-        "voted_up": 1 if src["voted_up"] not in ("0", "False", "false") else 0,
-        "playtime_h": f"{hours(src):.1f}" if hours(src) is not None else "",
-        "content": src["content"][:500],
-        "overall_sentiment": SENT_MAP.get(res.get("s"), "NEUTRAL"),
-        "key_phrase": res.get("k", ""),
-        # 분류 단계는 신뢰도를 묻지 않는다. 임의의 고정 값을 기록하면 실제 확신도로 오해된다.
-        "confidence": "",
-        "needs_verification": "",
-    }
-    for a in ASPECTS:
-        pairs = per_area[a]
-        if any(p[1] == "N" for p in pairs):
-            s = "NEGATIVE"
-        elif any(p[1] == "P" for p in pairs):
-            s = "POSITIVE"
-        else:
-            s = "NONE"
-        row[f"aspect_{a}_sentiment"] = s
-        row[f"aspect_{a}_evidence"] = ", ".join(p[0] for p in pairs)[:120]
-    row["keywords"] = "|".join(f"{p[0]}@{AREA_TOPIC[area_of[p[0]]]}" for p in tags)
-    return row
-
-
-ANALYSIS_FIELDS = (["recommendationid", "voted_up", "playtime_h", "content",
-              "overall_sentiment", "key_phrase", "confidence", "needs_verification"]
-             + [f"aspect_{a}_sentiment" for a in ASPECTS]
-             + [f"aspect_{a}_evidence" for a in ASPECTS]
-             + ["keywords"])
 
 
 async def classify(client, long_rows, themes):
     theme_names = [t["name"] for t in themes]
-    area_of = {t["name"]: t["area"] for t in themes}
     fun_names = list(FUN_TYPES)
     out_path = path("analysis_v3.jsonl")
-    if not os.path.exists(out_path) and os.path.exists(cfg.ANALYSIS_CSV):
-        legacy = path("analysis_legacy.csv")
-        if os.path.exists(legacy):
-            os.remove(legacy)
-        os.rename(cfg.ANALYSIS_CSV, legacy)
-        print(f"[B] 옛 방식 결과를 {os.path.basename(legacy)}로 보관하고 새로 분석합니다")
     done = read_jsonl(out_path)
     pending = [r for r in long_rows if r["recommendationid"] not in done]
     print(f"[B] 분류 대상 {len(long_rows)}건 / 이미 {len(done)}건 / 남은 {len(pending)}건")
@@ -390,32 +383,21 @@ async def classify(client, long_rows, themes):
     if copies:
         print(f"[B] 본문이 같은 리뷰 {sum(map(len, copies.values()))}건은 대표 리뷰 결과를 함께 씁니다")
 
-    write_header = not os.path.exists(cfg.ANALYSIS_CSV)
     f_v3 = open(out_path, "a", encoding="utf-8")
-    f_csv = open(cfg.ANALYSIS_CSV, "a", encoding="utf-8-sig", newline="")
-    writer = csv.DictWriter(f_csv, fieldnames=ANALYSIS_FIELDS)
-    if write_header:
-        writer.writeheader()
 
     stats = {"ok": 0, "fail": 0}
     sem = asyncio.Semaphore(limits.concurrency(CONCURRENCY))
 
     def save(src, res):
-        tags = clean_tags(res.get("t"), area_of)
+        # AI가 답한 것만 적는다. 추천 여부·플레이 시간 같은 원본 값은 reviews.csv에서 읽는다.
         item = {
             "id": src["recommendationid"],
-            "up": 1 if src["voted_up"] not in ("0", "False", "false") else 0,
-            "h": hours(src),
-            "len": len(src["content"]),
-            "votes": int(src.get("votes_up") or 0),
-            "ts": int(src.get("timestamp_created") or 0),
             "s": res.get("s") if res.get("s") in ("P", "N", "M", "U") else "U",
             "f": [x for x in (res.get("f") or []) if isinstance(x, str) and x in FUN_TYPES][:2],
-            "t": tags,
+            "t": clean_tags(res.get("t"), theme_names),
             "k": str(res.get("k", ""))[:40],
         }
         f_v3.write(json.dumps(item, ensure_ascii=False) + "\n")
-        writer.writerow(analysis_row(src, res, area_of))
         done[item["id"]] = item
         stats["ok"] += 1
         progress.report("classify", len(done), len(long_rows))
@@ -429,7 +411,7 @@ async def classify(client, long_rows, themes):
     async def run(batch):
         async with sem:
             payload = [brief(r) for r in batch]
-            user = USER_B.format(themes=", ".join(theme_names), fun=", ".join(fun_names), reviews=compact(payload))
+            user = USER_B.format(themes=theme_guide(themes), fun=", ".join(fun_names), reviews=compact(payload))
             try:
                 res = await ask(client, "B", SYSTEM_B, user, 90 * len(batch) + 60)
                 by_id = {str(x.get("id")): x for x in res if isinstance(x, dict)}
@@ -448,7 +430,7 @@ async def classify(client, long_rows, themes):
                 one = [brief(r)]
                 try:
                     res = await ask(client, "B", SYSTEM_B,
-                                    USER_B.format(themes=", ".join(theme_names), fun=", ".join(fun_names),
+                                    USER_B.format(themes=theme_guide(themes), fun=", ".join(fun_names),
                                                   reviews=compact(one)), 150)
                     if res and isinstance(res[0], dict) and str(res[0].get("id")) == r["recommendationid"]:
                         save(r, res[0])
@@ -458,14 +440,14 @@ async def classify(client, long_rows, themes):
                     raise
                 except Exception:
                     stats["fail"] += 1
-            f_v3.flush(); f_csv.flush()
+            f_v3.flush()
 
     batches = [pending[i:i + BATCH_B] for i in range(0, len(pending), BATCH_B)]
     tasks = [asyncio.create_task(run(b)) for b in batches]
     try:
         for i, t in enumerate(asyncio.as_completed(tasks), 1):
             await t
-            f_v3.flush(); f_csv.flush()
+            f_v3.flush()
             if i % max(1, len(batches) // 10) == 0 or i == len(batches):
                 print(f"  [B] {i}/{len(batches)} 묶음 · 성공 {stats['ok']} · 실패 {stats['fail']}")
     except (FatalApiError, BudgetExceeded):
@@ -473,7 +455,7 @@ async def classify(client, long_rows, themes):
             t.cancel()
         raise
     finally:
-        f_v3.close(); f_csv.close()
+        f_v3.close()
 
     total = stats["ok"] + stats["fail"]
     if stats["ok"] == 0:
@@ -487,7 +469,7 @@ async def classify(client, long_rows, themes):
 
 SYSTEM_C = "게임 기획자를 돕는 리뷰 분석가입니다. 리뷰에 없는 내용은 지어내지 않습니다. JSON 객체만 출력합니다."
 
-USER_C = """주제: {themes}
+USER_C = """주제 (이름: 무엇이 들어가는지): {themes}
 리뷰 원문은 여러 언어일 수 있습니다. prob, why, fix는 한국어로 쓰세요.
 
 불만이 있을 수 있는 리뷰입니다:
@@ -498,7 +480,7 @@ USER_C = """주제: {themes}
 - prob: 무엇이 불편하거나 싫은가, 25자 이내
 - why: 리뷰가 직접 밝힌 원인. 추측하지 말고 없으면 빈 문자열
 - fix: 유저가 "~해줬으면", "~하면 좋겠다"처럼 직접 요청한 해결책만. 없으면 빈 문자열
-- t는 위 주제 목록에서만
+- t는 위 주제 이름에서만 (설명은 빼고 이름만)
 - 불만이 없는 리뷰는 "p":[]"""
 
 
@@ -536,8 +518,9 @@ async def dig_complaints(client, long_rows, classified, themes):
                 continue
             parts = []
             for p in x.get("p") or []:
-                if isinstance(p, dict) and p.get("t") in theme_names:
-                    parts.append({k: str(p.get(k, ""))[:60] for k in ("t", "prob", "why", "fix")})
+                name = str(p.get("t", "")).split(":")[0].strip() if isinstance(p, dict) else ""
+                if name in theme_names:
+                    parts.append({"t": name, **{k: str(p.get(k, ""))[:60] for k in ("prob", "why", "fix")}})
             for twin in [rid] + [r["recommendationid"] for r in copies.pop(rid, [])]:
                 item = {"id": twin, "p": parts}
                 f_out.write(json.dumps(item, ensure_ascii=False) + "\n")
@@ -551,7 +534,7 @@ async def dig_complaints(client, long_rows, classified, themes):
             payload = [{"id": r["recommendationid"], "t": clip(r["content"], CLIP_C)} for r in batch]
             try:
                 res = await ask(client, "C", SYSTEM_C,
-                                USER_C.format(themes=", ".join(theme_names), reviews=compact(payload)),
+                                USER_C.format(themes=theme_guide(themes), reviews=compact(payload)),
                                 240 * len(batch) + 100)
             except (FatalApiError, BudgetExceeded):
                 raise
@@ -566,7 +549,7 @@ async def dig_complaints(client, long_rows, classified, themes):
             payload = [{"id": rid, "t": clip(row["content"], CLIP_C)}]
             try:
                 res = await ask(client, "C", SYSTEM_C,
-                                USER_C.format(themes=", ".join(theme_names), reviews=compact(payload)), 900)
+                                USER_C.format(themes=theme_guide(themes), reviews=compact(payload)), 900)
                 save_results(res, {rid})
             except (FatalApiError, BudgetExceeded):
                 raise
@@ -609,6 +592,11 @@ def save_usage():
         old = prev.get(s, {})
         merged[s] = {k: int(old.get(k, 0)) + USAGE[s][k] for k in USAGE[s]}
     merged["model"] = cfg.MODEL
+    stand_ins = dict(prev.get("stand_ins") or {})
+    for name, count in STAND_INS.items():
+        stand_ins[name] = stand_ins.get(name, 0) + count
+    if stand_ins:
+        merged["stand_ins"] = stand_ins
     merged["pricing"] = {"input_per_1m": cfg.MODEL_COST_INPUT,
                          "output_per_1m": cfg.MODEL_COST_OUTPUT}
     with open(p, "w", encoding="utf-8") as f:
@@ -621,6 +609,7 @@ def save_usage():
 async def run_all():
     for stage in USAGE:
         USAGE[stage] = {"calls": 0, "input": 0, "output": 0}
+    STAND_INS.clear()
     rows, long_rows = load_reviews()
     print(f"수집 {len(rows)}건 · AI 분석 대상 {len(long_rows)}건 · 짧거나 내용이 없는 리뷰 {len(rows) - len(long_rows)}건(집계만)")
     if not long_rows:

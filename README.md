@@ -11,9 +11,8 @@ Steam 리뷰 API
      A. 게임별 주제 발견
      B. 전체 리뷰 반응·주제·재미 분류
      C. 불만 리뷰만 문제·원인·요청 심층 분석
-  → 품질 점검·표본 검증
-  → v5 인사이트 집계
-  → 대시보드와 근거 원문
+  → 요약과 할 일 (AI 한 번)
+  → 대시보드: 건수·비율·자료 상태 점검은 화면을 열 때 원본에서 다시 계산
 ```
 
 분석 결과 화면은 특정 게임에 맞춘 고정 문구를 사용하지 않습니다. Steam 게임 정보와 분석 파일을 기준으로 같은 구조를 모든 게임에 적용합니다.
@@ -33,7 +32,7 @@ Steam 리뷰 API
 
 ## 토큰 사용 최적화
 
-1. 짧고 정보가 적은 리뷰는 LLM 호출 전에 걸러냅니다.
+1. 한 글자짜리처럼 내용이 없는 리뷰는 LLM에 보내지 않습니다.
 2. 주제는 최대 150건에서 한 번 발견하고 전체 리뷰에 재사용합니다.
 3. 전체 분류는 15건씩 묶고 짧은 키의 JSON으로 응답받습니다. 본문이 같은 리뷰는 한 번만 보냅니다.
 4. 불만 심층 분석은 불만 가능성이 있는 리뷰에만 실행합니다.
@@ -71,9 +70,8 @@ python pipeline.py --app-id 1623730 --lang koreana --budget 5
 # 단계별 실행
 python collect_reviews.py
 python analyze_reviews_v3.py
-python quality_check.py
-python verify_analysis.py
 python build_insights_v5.py
+python quality_check.py        # 자료 상태 점검을 콘솔로 보기 (저장하지 않음)
 ```
 
 대시보드: `http://127.0.0.1:8765/dashboard`
@@ -89,7 +87,7 @@ python build_insights_v5.py
 | `BUDGET_USD` | `5.0` | 실행당 최대 분석 예산 |
 | `TARGET_ERROR_PCT` | `5` | 목표 오차 범위 |
 | `MIN_NEG_REVIEWS` | `100` | 비추천 리뷰 최소 목표 |
-| `MIN_REVIEW_LEN` | `8` | AI 분석 최소 글자 수 |
+| `MIN_REVIEW_LEN` | `2` | AI 분석 최소 글자 수 |
 | `FREE_DAILY_REQUESTS` | `1000` | 무료 모델 하루 요청 한도 (10달러 미만 충전 계정은 `50`) |
 
 ## 결과 파일
@@ -102,13 +100,12 @@ python build_insights_v5.py
 | `sample_design.json` | 모집단과 표본 설계 |
 | `themes_v3.json` | 게임별 주제 목록 |
 | `analysis_v3.jsonl` | 리뷰별 반응·재미·주제 분류 |
-| `analysis_v3.csv` | 품질 점검과 리뷰 탐색용 표 |
 | `complaints_v3.jsonl` | 불만의 문제·원인·요청 |
 | `usage_v3.json` | 단계별 호출·토큰·모델 단가 |
-| `quality_report.json` | 데이터 품질 점검 |
-| `verify_report.json` | 표본 검증 결과 |
-| `insights_v5.json` | 대시보드 집계와 요약 |
+| `insights_v5.json` | AI 요약 · 할 일 · 주제 설명 |
 | `pipeline_result.json` | 실행 상태와 단계별 결과 |
+
+건수, 비율, 자료 상태 점검은 파일로 저장하지 않습니다. 화면을 열 때 `reviews.csv`와 `analysis_v3.jsonl`에서 다시 계산합니다. '분석 결과' 내보내기 CSV도 그때 만듭니다.
 
 ## 주요 API
 
@@ -120,9 +117,8 @@ python build_insights_v5.py
 | `GET` | `/api/games` | 분석이 완료된 게임 목록 |
 | `GET` | `/api/models` | 선택 가능한 OpenRouter 모델 |
 | `POST` | `/pipeline/run` | 분석 시작 |
-| `GET` | `/pipeline/estimate` | 남은 작업 비용 견적 |
 | `GET` | `/pipeline/result` | 최근 실행 상태 |
-| `GET` | `/api/usage` | 토큰과 비용 기록 |
+| `GET` | `/api/games/review-stats` | Steam 리뷰 수와 눈금별 수집 계획 |
 
 ## 폴더 구성
 
@@ -133,16 +129,16 @@ python build_insights_v5.py
 ├── pipeline.py                # 전체 실행 흐름
 ├── collect_reviews.py         # Steam 수집과 표본 설계
 ├── analyze_reviews_v3.py      # 주제·반응·재미·불만 분석
-├── build_insights_v5.py       # 화면용 집계와 요약
-├── dashboard_evidence.py      # 근거 원문 조회
+├── sampling.py                # 표본 수식 (수집 계획 · 오차 · Wilson 범위)
+├── dashboard_evidence.py      # 화면의 모든 건수·비율 집계와 근거 원문
+├── build_insights_v5.py       # AI 요약과 할 일
 ├── model_catalog.py           # OpenRouter 모델과 가격
 ├── openrouter_limits.py       # 무료 모델 요청 속도와 하루 한도
 ├── progress.py                # 분석 진행 단계와 건수 (진행 화면용)
 ├── analysis_design.py         # 주제 자동 합치기와 분석 설계서
 ├── budget_control.py          # 실행 중 예산 통제
 ├── token_budget.py            # 실행 전 비용 견적
-├── quality_check.py           # 품질 점검
-├── verify_analysis.py         # 표본 검증
+├── quality_check.py           # 자료 상태 점검 (화면을 열 때 계산)
 ├── static/                    # 대시보드 화면
 ├── tests/                     # 핵심 회귀 검사
 └── docs/                      # 구조·조사·화면 설계 문서

@@ -40,18 +40,15 @@ class Config:
     # 비용 설정 (USD per 1M tokens 기준)
     MODEL_COST_INPUT: float = float(os.getenv("MODEL_COST_INPUT", "0.10"))   # $/1M input tokens
     MODEL_COST_OUTPUT: float = float(os.getenv("MODEL_COST_OUTPUT", "0.40")) # $/1M output tokens
-    AVG_INPUT_TOKENS: int = 450   # 프롬프트+리뷰 평균 토큰
-    AVG_OUTPUT_TOKENS: int = 350  # 응답 평균 토큰
     BUDGET_USD: float = float(os.getenv("BUDGET_USD", "5.0"))  # 기본 예산 $5
 
     # ── 표본 설계 ───────────────────────────────────────────
     TARGET_ERROR_PCT: float = float(os.getenv("TARGET_ERROR_PCT", "5"))
     MIN_NEG_REVIEWS: int = int(os.getenv("MIN_NEG_REVIEWS", "100"))
-    Z_95: float = 1.96
     MIN_REVIEW_LEN: int = int(os.getenv("MIN_REVIEW_LEN", "2"))
     CUSTOM_SAMPLE_SIZE: int = None
     COLLECT_SINCE: str = None      # YYYY-MM-DD. 이 날짜 이후 리뷰만 모은다 (None이면 전체 기간)
-    COLLECT_SORT: str = "recent"   # recent 최신순 · helpful 공감순
+    COLLECT_SORT: str = "recent"   # recent 최신순 · helpful 공감순 · random 무작위
 
     # ── 파일 경로 ───────────────────────────────────────────
     PROGRAM_DIR: str = str(PROGRAM_DIR)
@@ -71,25 +68,8 @@ class Config:
         return os.path.join(self.project_dir(app_id), filename)
 
     @property
-    def BASE_DIR(self) -> str:
-        """Compatibility alias for modules that need the program directory."""
-        return self.PROGRAM_DIR
-
-    @property
     def REVIEWS_CSV(self) -> str:
         return self.project_file("reviews.csv")
-
-    @property
-    def ANALYSIS_CSV(self) -> str:
-        return self.project_file("analysis_v3.csv")
-
-    @property
-    def QUALITY_JSON(self) -> str:
-        return self.project_file("quality_report.json")
-
-    @property
-    def VERIFY_JSON(self) -> str:
-        return self.project_file("verify_report.json")
 
     @property
     def SAMPLE_JSON(self) -> str:
@@ -98,24 +78,6 @@ class Config:
     @property
     def PIPELINE_RESULT(self) -> str:
         return self.project_file("pipeline_result.json")
-
-    def estimate_cost(self, n_reviews: int) -> dict:
-        """LLM 분석 비용 사전 견적
-
-        Returns:
-            {"n_reviews": int, "estimated_usd": float,
-             "budget_usd": float, "within_budget": bool}
-        """
-        input_cost = (n_reviews * self.AVG_INPUT_TOKENS / 1_000_000) * self.MODEL_COST_INPUT
-        output_cost = (n_reviews * self.AVG_OUTPUT_TOKENS / 1_000_000) * self.MODEL_COST_OUTPUT
-        total = round(input_cost + output_cost, 4)
-        return {
-            "n_reviews": n_reviews,
-            "model": self.MODEL,
-            "estimated_usd": total,
-            "budget_usd": self.BUDGET_USD,
-            "within_budget": total <= self.BUDGET_USD,
-        }
 
     def get_game_name(self) -> str:
         """Steam Store API에서 게임 이름을 가져옵니다."""

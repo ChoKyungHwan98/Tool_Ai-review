@@ -23,13 +23,13 @@ import httpx
 
 from config import cfg
 import progress
+import sampling
 
 # ─── 설정 ──────────────────────────────────────────────────────────────
 def get_app_id(): return cfg.APP_ID
 def get_lang(): return cfg.LANG
 def get_target_error(): return cfg.TARGET_ERROR_PCT
 def get_min_neg(): return cfg.MIN_NEG_REVIEWS
-def get_z95(): return cfg.Z_95
 def get_out_csv(): return cfg.REVIEWS_CSV
 def get_out_json(): return cfg.SAMPLE_JSON
 def get_url(): return cfg.STEAM_API_URL
@@ -38,7 +38,7 @@ def get_sort():
     return value if value in ("helpful", "random") else "recent"
 
 RANDOM_SEED = 42            # 같은 범위를 다시 뽑으면 같은 리뷰가 나온다
-RANDOM_POOL_MAX = 60000     # 무작위로 뽑기 전에 훑는 리뷰 수의 한도 (약 10분)
+RANDOM_POOL_MAX = 60000     # 무작위로 뽑기 전에 훑는 리뷰 수의 한도 (약 20분)
 def get_since_ts():
     since = getattr(cfg, "COLLECT_SINCE", None)
     if not since:
@@ -74,72 +74,85 @@ def fetch_population():
 
 # ─── 2단계: 표본 크기 계산 ─────────────────────────────────────────────
 
-def cochran_n(N, p=0.5, z=get_z95(), e=0.05):
-    """유한모집단 보정 Cochran 공식."""
-    n0 = (z ** 2 * p * (1 - p)) / (e ** 2)
-    n = n0 / (1 + (n0 - 1) / N) if N > 0 else n0
-    return math.ceil(n)
-
-
-def margin_of_error(n, N, p=0.5, z=get_z95()):
-    """현재 n으로 도달 가능한 오차한계 (%)."""
-    if n <= 0 or N <= 0: return 100.0
-    if n >= N: return 0.0
-    se2 = (p * (1 - p) / n) * (N - n) / (N - 1)
-    return z * math.sqrt(max(se2, 0)) * 100
-
-
 def decide_sample_size(pop):
-    """목표 오차한계와 최소 부정 건수를 모두 만족하는 n 결정."""
-    custom_size = getattr(cfg, "CUSTOM_SAMPLE_SIZE", None)
-    if custom_size is not None and custom_size > 0:
-        n = min(custom_size, pop["total"])
-        n_pos = math.ceil(n * pop["pos_rate"])
-        n_neg = n - n_pos
-        actual_error = margin_of_error(n, pop["total"])
-        return {
-            "n_total": n,
-            "n_pos": n_pos,
-            "n_neg": n_neg,
-            "error_pct": round(actual_error, 2),
-            "reason": f"사용자 지정 커스텀 수집 건수 {n}건 적용 (모집단 비율 유지)",
-        }
-
-    e = get_target_error() / 100
-    n_by_error = cochran_n(pop["total"], p=0.5, z=get_z95(), e=e)
-
-    # 부정 리뷰 최소 건수 확보를 위한 n
-    neg_rate = pop["neg_rate"]
-    if neg_rate > 0:
-        n_for_neg = math.ceil(get_min_neg() / neg_rate)
-    else:
-        n_for_neg = n_by_error
-
-    n = max(n_by_error, n_for_neg)
-
-    # 모집단보다 크면 모집단 전체로
-    n = min(n, pop["total"])
-
-    n_pos = math.ceil(n * pop["pos_rate"])
-    n_neg = n - n_pos  # 나머지 전부 부정
-
-    actual_error = margin_of_error(n, pop["total"])
-
-    return {
-        "n_total": n,
-        "n_pos": n_pos,
-        "n_neg": n_neg,
-        "error_pct": round(actual_error, 2),
-        "reason": f"오차 ±{get_target_error()}% 충족 필요 n={n_by_error}, 부정 최소 {get_min_neg()}건 필요 n={n_for_neg} → max={n}",
-    }
-
+    """지금 설정(목표 오차 · 비추천 최소 건수 · 직접 지정)으로 수집할 건수를 정한다. 식은 sampling.py에 있다."""
+    custom = getattr(cfg, "CUSTOM_SAMPLE_SIZE", None)
+    plan = sampling.plan_sample_size(pop["total"], pop["negative"], get_target_error(), get_min_neg(),
+                                     custom if custom and custom > 0 else None)
+    reason = (f"직접 지정한 {plan['n_total']}건" if custom and custom > 0
+              else f"오차 ±{get_target_error()}%에 {plan['n_by_error']}건, 비추천 최소 {get_min_neg()}건에 {plan['n_for_neg']}건 → {plan['n_total']}건")
+    return {"n_total": plan["n_total"], "n_pos": plan["n_pos"], "n_neg": plan["n_neg"], "reason": reason}
 
 # ─── 3단계: 수집 ──────────────────────────────────────────────────────
 
-def collect_reviews(review_type, target, existing_ids, base=0, total=None, scan_status=None):
-    """review_type별로 target건 수집. scan_status는 끝까지 훑었는지 기록한다."""
-    collected = []
-    cursor = "*"
+# Steam은 짧은 시간에 많이 물으면 429(요청이 너무 많음)로 거절한다. 무작위는 수백 쪽을 이어서 받으므로
+# 천천히 묻고, 거절당하면 기다렸다가 같은 쪽부터 다시 묻는다. 기다림을 다 쓰면 멈춘다.
+RATE_WAITS = (30, 60, 120, 180, 300)
+PAGE_INTERVAL = {"random": 1.5}     # 쪽 사이 쉬는 시간(초). 그 밖의 방법은 몇십 쪽이라 0.6초
+
+
+def steam_page(params):
+    """Steam 리뷰 한 쪽을 받는다."""
+    for wait in RATE_WAITS + (None,):
+        r = httpx.get(get_url().format(appid=get_app_id()), params=params, timeout=30.0)
+        if r.status_code != 429:
+            r.raise_for_status()
+            return r.json()
+        if wait is not None:
+            print(f"  Steam이 요청이 많다고 합니다. {wait}초 기다렸다가 이어서 받습니다.")
+            time.sleep(wait)
+    raise ValueError("Steam이 요청을 계속 거절합니다(요청이 너무 많음). 10분쯤 뒤에 같은 설정으로 다시 실행하면 받은 데부터 이어서 모읍니다")
+
+
+class ScanCheckpoint:
+    """훑은 데까지의 기록. 수집이 멈춰도 남아 있다가, 같은 범위로 다시 실행하면 그 자리부터 이어서 훑는다.
+
+    scan_rows.jsonl에 받은 리뷰를 한 줄씩 덧붙이고, scan_state.json에 범위·다음 쪽 위치·건수를 적는다.
+    수집이 끝나 reviews.csv가 만들어지면 두 파일을 지운다.
+    """
+    MAX_AGE = 24 * 3600   # 하루가 지난 기록은 버린다. 그사이 새 리뷰가 많이 쌓였을 수 있다
+
+    def __init__(self, folder, scope):
+        self.rows_path = os.path.join(folder, "scan_rows.jsonl")
+        self.state_path = os.path.join(folder, "scan_state.json")
+        self.scope = scope
+        self.rows, self.cursor = [], "*"
+
+    def load(self):
+        try:
+            with open(self.state_path, "r", encoding="utf-8") as stream:
+                state = json.load(stream)
+            if state.get("scope") != self.scope or time.time() - state.get("saved_at", 0) > self.MAX_AGE:
+                return False
+            with open(self.rows_path, "r", encoding="utf-8") as stream:
+                rows = [json.loads(line) for line in stream if line.strip()]
+        except (OSError, ValueError):
+            return False
+        if len(rows) < state.get("count", 0) or not state.get("cursor"):
+            return False
+        self.rows, self.cursor = rows[:state["count"]], state["cursor"]   # 쓰다 만 줄은 버린다
+        return bool(self.rows)
+
+    def save(self, new_rows, cursor, count):
+        with open(self.rows_path, "a" if count > len(new_rows) else "w", encoding="utf-8") as stream:
+            for row in new_rows:
+                stream.write(json.dumps(row, ensure_ascii=False) + "\n")
+        with open(self.state_path + ".tmp", "w", encoding="utf-8") as stream:
+            json.dump({"scope": self.scope, "cursor": cursor, "count": count, "saved_at": time.time()}, stream, ensure_ascii=False)
+        os.replace(self.state_path + ".tmp", self.state_path)
+
+    def clear(self):
+        for path in (self.rows_path, self.state_path):
+            if os.path.exists(path):
+                os.remove(path)
+
+
+def collect_reviews(review_type, target, existing_ids, base=0, total=None, scan_status=None, checkpoint=None):
+    """review_type별로 target건 수집. scan_status는 끝까지 훑었는지 기록한다.
+    checkpoint를 주면 쪽마다 훑은 데까지를 남기고, 남아 있는 기록이 있으면 거기서부터 이어서 받는다."""
+    collected = list(checkpoint.rows) if checkpoint else []
+    cursor = checkpoint.cursor if checkpoint else "*"
+    existing_ids.update(row["recommendationid"] for row in collected)
     since_ts = get_since_ts()
     params = {"json": 1, "filter": "recent", "language": get_lang(),
               "review_type": review_type, "purchase_type": "all",
@@ -153,9 +166,7 @@ def collect_reviews(review_type, target, existing_ids, base=0, total=None, scan_
                 raise ValueError("공감순 수집은 최근 365일 이내 기간만 지원합니다. 시작 날짜를 바꾸세요")
             params["day_range"] = max(1, days)
     while len(collected) < target:
-        r = httpx.get(get_url().format(appid=get_app_id()), params={**params, "cursor": cursor}, timeout=30.0)
-        r.raise_for_status()
-        data = r.json()
+        data = steam_page({**params, "cursor": cursor})
         reviews = data.get("reviews", [])
         if not reviews:
             if scan_status is not None:
@@ -164,6 +175,7 @@ def collect_reviews(review_type, target, existing_ids, base=0, total=None, scan_
             break
         new_count = 0
         older = 0
+        page_start = len(collected)
         for rv in reviews:
             rid = str(rv.get("recommendationid"))
             if since_ts and int(rv.get("timestamp_created") or 0) < since_ts:
@@ -200,7 +212,9 @@ def collect_reviews(review_type, target, existing_ids, base=0, total=None, scan_
         if not next_cursor or next_cursor == cursor:
             break
         cursor = next_cursor
-        time.sleep(0.6)
+        if checkpoint:
+            checkpoint.save(collected[page_start:], cursor, len(collected))
+        time.sleep(PAGE_INTERVAL.get(get_sort(), 0.6))
     return collected
 
 
@@ -224,7 +238,6 @@ def main():
     design = decide_sample_size(pop)
     print(f"  목표: 오차 ±{get_target_error()}% + 부정 최소 {get_min_neg()}건")
     print(f"  결정: 총 {design['n_total']}건 (긍정 {design['n_pos']} / 부정 {design['n_neg']})")
-    print(f"  표본 크기 계획 기준: ±{design['error_pct']}% (무작위 추출 가정)")
     print(f"  사유: {design['reason']}")
 
     # 3) 수집
@@ -246,8 +259,12 @@ def main():
         print(f"\n  ── 범위 안의 리뷰를 모두 훑습니다 (최대 {RANDOM_POOL_MAX:,}건) ──")
         progress.report("collect", 0, min(pop["total"], RANDOM_POOL_MAX), force=True)
         scan_status = {"complete": False}
+        checkpoint = ScanCheckpoint(cfg.project_dir(), {"app_id": get_app_id(), "language": get_lang(),
+                                                        "since": getattr(cfg, "COLLECT_SINCE", None)})
+        if checkpoint.load():
+            print(f"  지난번에 훑은 {len(checkpoint.rows):,}건에서 이어서 받습니다")
         pool = collect_reviews("all", RANDOM_POOL_MAX, seen_ids, 0,
-                               min(pop["total"], RANDOM_POOL_MAX), scan_status=scan_status)
+                               min(pop["total"], RANDOM_POOL_MAX), scan_status=scan_status, checkpoint=checkpoint)
         # 전체 기간이면 Steam 모집단 건수와도 대조한다. API가 일찍 빈 페이지를 주는 경우를 완주로 오인하지 않는다.
         # Steam이 알려 주는 전체 건수에는 지워졌거나 가려져 받을 수 없는 글이 조금 섞여 있어 2%까지는 완주로 본다.
         complete = scan_status["complete"] and (get_since_ts() is not None or len(pool) >= pop["total"] * .98)
@@ -281,9 +298,6 @@ def main():
     actual_pos = sum(1 for r in all_reviews if str(r["voted_up"]).lower() in ("1", "true"))
     actual_neg = len(all_reviews) - actual_pos
     actual_total = len(all_reviews)
-    planning_error = margin_of_error(actual_total, pop["total"])
-    error_valid = bool(random_pool and random_pool["complete"])
-    actual_error = margin_of_error(actual_total, random_pool["size"]) if error_valid else None
 
     record = {
         "population": pop,
@@ -294,12 +308,10 @@ def main():
             "negative": actual_neg,
             "pos_rate": round(actual_pos / actual_total, 4) if actual_total else 0,
             "neg_rate": round(actual_neg / actual_total, 4) if actual_total else 0,
-            "error_pct": round(actual_error, 2) if actual_error is not None else None,
-            "planning_error_pct": round(planning_error, 2),
-            "error_valid": error_valid,
         },
         "params": {
             "target_error_pct": get_target_error(),
+            "custom_sample_size": getattr(cfg, "CUSTOM_SAMPLE_SIZE", None),
             "min_neg": get_min_neg(),
             "confidence_level": 0.95,
             "language": get_lang(),
@@ -312,6 +324,8 @@ def main():
     }
     with open(get_out_json(), "w", encoding="utf-8") as f:
         json.dump(record, f, ensure_ascii=False, indent=2)
+    if random_pool is not None:
+        checkpoint.clear()   # 리뷰 파일이 만들어졌으니 훑던 기록은 필요 없다
 
     # 6) 요약
     print(f"\n{'='*60}")
@@ -319,21 +333,7 @@ def main():
     print(f"  총 {actual_total}건 → {get_out_csv()}")
     print(f"  긍정: {actual_pos}건 ({actual_pos/actual_total*100:.1f}%)")
     print(f"  부정: {actual_neg}건 ({actual_neg/actual_total*100:.1f}%)")
-    if error_valid:
-        print(f"  수집 범위의 추천 비율 최대 표본 오차: ±{actual_error:.2f}%p (95% 신뢰수준)")
-    else:
-        print("  통계적 표본 오차: 확인 불가 (무작위 수집 범위가 완성되지 않음)")
     print(f"  설계 기록: {get_out_json()}")
-
-    # 비율 검증
-    ratio_diff = abs(actual_pos / actual_total - pop["pos_rate"]) * 100
-    if ratio_diff <= 2:
-        print(f"  ✅ 할당한 추천·비추천 비율대로 수집됨 (차이 {ratio_diff:.1f}%p). 최신순 수집이라 무작위 표본은 아님")
-    else:
-        print(f"  ⚠️ 모집단 비율과 {ratio_diff:.1f}%p 차이 — 표본 부족 가능")
-
-    avg_play = sum(int(r.get("playtime_forever_min") or 0) for r in all_reviews) / max(actual_total, 1) / 60
-    print(f"  평균 플레이타임: {avg_play:.1f}시간")
     print(f"{'='*60}")
 
 

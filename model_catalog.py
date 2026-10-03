@@ -66,5 +66,30 @@ def list_models(force=False):
     return list(models)
 
 
+SMALL_WORDS = ("nano", "mini", "small", "tiny", "lite", "reasoning", "preview")
+MIN_FALLBACK_SIZE = 20   # 이름에 적힌 크기(○○b)가 이보다 작은 모델은 긴 JSON 답을 끝까지 못 쓰는 일이 잦다
+
+
+def model_size(model_id):
+    """모델 이름에 적힌 크기(예: '-31b-' → 31). 적혀 있지 않으면 0."""
+    import re
+    sizes = [float(x) for x in re.findall(r"(?<![a-z0-9.])(\d+(?:\.\d+)?)b(?![a-z0-9])", model_id.lower())]
+    return max(sizes, default=0)
+
+
+def free_fallbacks(model_id):
+    """고른 무료 모델이 붐빌 때 대신 답할 무료 모델(최대 2개). 같은 회사 모델을 먼저, 그다음 크기가 큰 순서.
+
+    무료 모델은 여러 사람이 같이 써서 수시로 요청을 거절한다. 대체 모델이 없으면 분석이 그때마다 멈춘다.
+    OpenRouter의 무료 라우터(openrouter/free)는 쓰지 않는다. 아주 작은 모델로 보내는 일이 있어 JSON 답이 중간에 끊긴다.
+    """
+    vendor = model_id.split("/")[0]
+    usable = [m for m in list_models()
+              if m["free"] and m["id"].endswith(":free") and m["id"] != model_id and m.get("json_schema")
+              and model_size(m["id"]) >= MIN_FALLBACK_SIZE and not any(word in m["id"].lower() for word in SMALL_WORDS)]
+    usable.sort(key=lambda m: (m["id"].split("/")[0] != vendor, -model_size(m["id"])))
+    return [m["id"] for m in usable[:2]]
+
+
 def get_model(model_id):
     return next((model for model in list_models() if model["id"] == model_id), None)

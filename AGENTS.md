@@ -5,7 +5,8 @@ Steam 리뷰를 수집해 AI로 주제·감성을 분류하고, 게임 기획자
 ## 구조
 
 - `main.py` — API와 `/dashboard` 페이지. `/dashboard/data/v5`가 대시보드 데이터 전체를 준다.
-- `dashboard_evidence.py` — 대시보드 집계(`build_evidence`)와 원문 페이지(`evidence_page`). 숫자는 여기서만 계산한다.
+- `dashboard_evidence.py` — 대시보드 집계(`build_evidence`)와 원문 페이지(`evidence_page`). 건수·비율은 여기서만 계산한다. `build_insights_v5.py`(AI 요약·할 일)와 `quality_check.py`(자료 상태 점검)도 이 모듈의 읽기·합치기 함수를 쓴다.
+- `sampling.py` — 표본 수식(수집 건수 계획, 오차, Wilson 범위). 수집기·분석 시작 창·분석 방법 화면이 모두 이 식을 쓴다. 화면(JS)에서 식을 다시 쓰지 않는다.
 - `static/dashboard.html` — 앱 틀(사이드바, 검색, 다른 페이지). 요약 화면은 `ReviewDashboard.render`에 맡긴다.
 - `static/review-dashboard.js` / `.css` — '진단 요약' 화면 전부.
 - `static/review-pages.js` / `.css` — '심층 분석', '리뷰 원문', '분석 설계' 화면.

@@ -419,12 +419,9 @@ window.ReviewDashboard = (() => {
       || dots.some(d => { const nx = Math.max(b.x, Math.min(d.cx, b.x + b.w)), ny = Math.max(b.y, Math.min(d.cy, b.y + b.h)); return Math.hypot(d.cx - nx, d.cy - ny) < d.rad + 1; });
     // 네 영역. 오른쪽 = 언급 수 중앙값 이상, 위 = 불만 50% 초과
     const quads = [
-      {cls:'is-fix', text:'많이 언급 · 불만 많음', size:14, right:true, top:true},
-      {cls:'is-keep', text:'많이 언급 · 칭찬 많음', size:14, right:true, top:false},
-      {cls:'is-watch', text:'적게 언급 · 불만 많음', size:13, right:false, top:true},
-      {cls:'is-small', text:'적게 언급 · 칭찬 많음', size:13, right:false, top:false}].map(q => ({...q,
-        x0: q.right ? xm : L, x1: q.right ? W - R : xm, y0: q.top ? T : ym, y1: q.top ? ym : H - B,
-        n: topics.filter(t => (t.mentions >= median) === q.right && (share(t) > .5) === q.top).length}));
+      {cls:'is-fix', right:true, top:true}, {cls:'is-keep', right:true, top:false},
+      {cls:'is-watch', right:false, top:true}, {cls:'is-small', right:false, top:false}].map(q => ({...q,
+        x0: q.right ? xm : L, x1: q.right ? W - R : xm, y0: q.top ? T : ym, y1: q.top ? ym : H - B}));
     // 영역 이름: 네 칸 모두 같은 크기의 바탕 글자. 칸 안에서 원과 겹치지 않는 자리를 찾아 놓고,
     // 주제 이름이 그 위에 올라오지 않도록 자리를 맡아 둔다.
     const QUAD_TITLE = {'is-fix': '집중 개선', 'is-keep': '유지 강화', 'is-watch': '낮은 우선순위', 'is-small': '작은 강점'};
@@ -551,7 +548,6 @@ window.ReviewDashboard = (() => {
     if (!rows.length) { target.innerHTML = '<div class="rd-empty">작성 당시 플레이 시간이 있는 리뷰가 없습니다.</div>'; return; }
     const max = Math.max(10, base || 0, ...rows.filter(c => !c.small).map(c => c.negative_rate || 0)) * 1.15;
     const x = v => clamp(v / max * 100);
-    const tops = Object.fromEntries((data.playtime || []).map(p => [p.label, p.top_neg || []]));
     target.innerHTML = `<div class="rd-cohorts">${rows.map(c => `<div class="rd-cohort ${c.small ? 'is-small' : ''}">
         <span class="rd-cohort-label"><b>${esc(c.label)}</b><small>${num(c.n)}건</small></span>
         <span class="rd-cohort-track" role="img" aria-label="${esc(c.label)}, ${num(c.n)}건 중 비추천 ${num(c.negative)}건, ${pct(c.negative_rate)}${c.small ? ', 표본 적음' : ''}">
@@ -559,7 +555,7 @@ window.ReviewDashboard = (() => {
           ${c.negative_rate == null || c.small ? '' : `<i class="rd-cohort-fill" style="width:${x(c.negative_rate)}%"></i>`}
         </span>
         <span class="rd-cohort-val">${c.small ? `<small>표본 적음 (${num(c.negative)}/${num(c.n)}건)</small>` : pct(c.negative_rate)}</span>
-        ${!c.small && tops[c.label]?.length ? `<span class="rd-cohort-top">많이 나온 불만 · ${tops[c.label].map(t => `${esc(t.name)} ${num(t.count)}건`).join(' · ')}</span>` : ''}
+        ${!c.small && c.top_neg?.length ? `<span class="rd-cohort-top">많이 나온 불만 · ${c.top_neg.map(t => `${esc(t.name)} ${num(t.count)}건`).join(' · ')}</span>` : ''}
       </div>`).join('')}</div>
       <p class="rd-note">막대는 그 시간대에 쓴 리뷰 중 Steam 비추천 비율입니다. 플레이 시간이 짧아서 비추천했다는 뜻은 아닙니다.</p>`;
   }

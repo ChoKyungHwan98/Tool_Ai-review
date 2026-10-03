@@ -5,13 +5,12 @@
   CLI:   python pipeline.py --app-id 730 --lang english
   API:   POST /pipeline/run  {"app_id": 1623730}
 
-5단계 분석을 한 번에 실행:
-  ① 모집단 조회 + 표본 설계
-  ② 리뷰 수집 (Steam API)
-  ③ LLM 다차원 분석 (비용 사전 견적)
-  ④ 품질 점검
-  ⑤ 신뢰도 검증
-  ⑥ 인사이트 요약 생성
+네 단계를 한 번에 실행한다:
+  ① 리뷰 수집 (Steam, 표본 설계 포함)
+  ② 남은 AI 작업 비용 견적 (예산을 넘으면 멈춤)
+  ③ AI 분석 (주제 찾기 · 전체 분류 · 불만 자세히 읽기)
+  ④ 요약과 할 일 생성
+자료 상태 점검과 건수 집계는 저장하지 않고 화면을 열 때 다시 계산한다.
 """
 
 import os
@@ -40,6 +39,7 @@ class PipelineResult:
         self.steps = {}
         self.status = "running"
         self.error = None
+        self.request = {}      # 시작할 때 고른 설정. 멈춘 뒤 "이어서 하기"가 똑같은 설정으로 다시 시작하는 데 쓴다
 
     def record(self, step: str, status: str, detail: dict = None):
         self.steps[step] = {
@@ -72,6 +72,7 @@ class PipelineResult:
             "started_at": self.started_at,
             "finished_at": getattr(self, "finished_at", None),
             "config": cfg.summary(),
+            "request": self.request,
             "steps": self.steps,
             "error": self.error,
         }
@@ -128,6 +129,8 @@ def step_collect(result: PipelineResult):
     existing_count = 0
     existing_language = None
     existing_scope = None
+    existing_request = None
+    existing_planned = None
     if os.path.exists(cfg.REVIEWS_CSV):
         import csv
         try:
@@ -138,20 +141,26 @@ def step_collect(result: PipelineResult):
     if os.path.exists(cfg.SAMPLE_JSON):
         try:
             with open(cfg.SAMPLE_JSON, "r", encoding="utf-8") as stream:
-                existing_params = json.load(stream).get("params") or {}
+                existing_record = json.load(stream)
+                existing_params = existing_record.get("params") or {}
                 existing_language = existing_params.get("language")
                 existing_scope = (existing_params.get("since"), existing_params.get("sort") or "recent")
+                existing_request = (existing_params.get("target_error_pct"), existing_params.get("custom_sample_size"))
+                existing_planned = (existing_record.get("design") or {}).get("n_total")
         except (OSError, ValueError):
             pass
     incremental_mode = getattr(result, "incremental", False)
     if incremental_mode and existing_count and existing_language != cfg.LANG:
         raise ValueError("다른 언어의 기존 리뷰에는 이어서 수집할 수 없습니다. 새 분석으로 시작하세요")
 
-    # 3) 기존 수집량이 목표량을 채운 경우에만 수집 단계를 건너뜀 (장애 재개 용도)
+    # 3) 이미 다 모았으면 수집을 건너뛴다. 같은 요청(같은 오차·건수)으로 계획대로 모은 표본은,
+    #    그 사이 Steam 전체 건수가 늘어 계획이 한두 건 달라져도 다시 모으지 않는다(같은 리뷰로 다시 분석할 수 있게).
     same_scope = existing_scope == (cfg.COLLECT_SINCE, cfg.COLLECT_SORT or "recent")
     if incremental_mode and existing_count and not same_scope:
         raise ValueError("기간이나 정렬이 다른 기존 리뷰에는 이어서 수집할 수 없습니다. 새 분석으로 시작하세요")
-    if existing_count >= target_size and existing_language == cfg.LANG and same_scope and not incremental_mode:
+    same_request = existing_request == (cfg.TARGET_ERROR_PCT, getattr(cfg, "CUSTOM_SAMPLE_SIZE", None))
+    filled = existing_count >= target_size or (same_request and existing_planned and existing_count >= existing_planned)
+    if filled and existing_language == cfg.LANG and same_scope and not incremental_mode:
         print(f"  ✅ 유효한 기존 리뷰 파일 존재 ({existing_count}건, 목표 {target_size}건 충족) — 수집 스킵")
         result.record("collect", "skipped", {"existing_reviews": existing_count, "target_reviews": target_size})
         return
@@ -166,9 +175,7 @@ def step_collect(result: PipelineResult):
     # 새 수집의 이전 산출물은 보관한다. 다른 언어의 주제/분류를 섞지 않는다.
     if not incremental_mode and existing_count:
         names = ("reviews.csv", "sample_design.json", "themes_v3.json", "analysis_v3.jsonl",
-                 "complaints_v3.jsonl", "analysis_v3.csv", "insights_v5.json",
-                 "summary_v5_cache.json", "usage_v3.json", "quality_report.json", "verify_report.json",
-                 "verify_set.csv")
+                 "complaints_v3.jsonl", "insights_v5.json", "summary_v5_cache.json", "usage_v3.json")
         backup_dir = os.path.join(cfg.project_dir(), "previous-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
         os.makedirs(backup_dir, exist_ok=True)
         for name in names:
@@ -198,7 +205,8 @@ def step_analyze(result: PipelineResult):
     if not os.path.exists(cfg.REVIEWS_CSV):
         raise FileNotFoundError("reviews.csv가 없습니다. 먼저 수집을 실행하세요.")
 
-    # A different model must actually reclassify the game's reviews.
+    # 모델이 바뀌었거나 주제 찾기 방식이 바뀌었으면, 예전 AI 결과를 보관하고 같은 리뷰를 다시 분류한다.
+    reason = None
     usage_path = cfg.project_file("usage_v3.json")
     if os.path.exists(usage_path) and os.path.exists(cfg.project_file("analysis_v3.jsonl")):
         try:
@@ -207,16 +215,25 @@ def step_analyze(result: PipelineResult):
         except (OSError, ValueError):
             previous_model = None
         if previous_model and previous_model != cfg.MODEL:
-            backup_dir = os.path.join(cfg.project_dir(), "previous-model-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
-            os.makedirs(backup_dir, exist_ok=True)
-            for name in ("themes_v3.json", "analysis_v3.jsonl", "complaints_v3.jsonl",
-                         "analysis_v3.csv", "insights_v5.json",
-                         "summary_v5_cache.json", "usage_v3.json", "quality_report.json", "verify_report.json",
-                         "verify_set.csv"):
-                source = os.path.join(cfg.project_dir(), name)
-                if os.path.isfile(source):
-                    shutil.move(source, os.path.join(backup_dir, name))
-            print(f"  분석 모델 변경: 이전 결과 보관 후 {cfg.MODEL}로 다시 분류합니다")
+            reason = "model"
+    themes_path = cfg.project_file("themes_v3.json")
+    if reason is None and os.path.exists(themes_path):
+        from analyze_reviews_v3 import themes_are_current
+        try:
+            with open(themes_path, "r", encoding="utf-8") as stream:
+                if not themes_are_current(json.load(stream)):
+                    reason = "themes"
+        except (OSError, ValueError):
+            reason = "themes"
+    if reason:
+        backup_dir = os.path.join(cfg.project_dir(), f"previous-{reason}-" + datetime.now().strftime("%Y%m%d-%H%M%S"))
+        os.makedirs(backup_dir, exist_ok=True)
+        for name in ("themes_v3.json", "analysis_v3.jsonl", "complaints_v3.jsonl",
+                     "insights_v5.json", "summary_v5_cache.json", "usage_v3.json"):
+            source = os.path.join(cfg.project_dir(), name)
+            if os.path.isfile(source):
+                shutil.move(source, os.path.join(backup_dir, name))
+        print("  " + ("분석 모델 변경" if reason == "model" else "주제 찾기 방식 변경") + ": 이전 결과를 보관하고 다시 분류합니다")
 
     try:
         # v3: 게임별 주제 + 재미 종류 + 불만 심층을 한 번의 분류 흐름으로 만든다.
@@ -229,63 +246,10 @@ def step_analyze(result: PipelineResult):
         raise
 
 
-def step_quality(result: PipelineResult):
-    """Step 3: 품질 점검"""
-    print("\n" + "=" * 60)
-    print("🔍 [Step 3] 데이터 품질 점검")
-    print("=" * 60)
-
-    try:
-        from quality_check import main as quality_main
-        quality_main()
-        # 결과 읽기
-        if os.path.exists(cfg.QUALITY_JSON):
-            with open(cfg.QUALITY_JSON, "r", encoding="utf-8") as f:
-                qr = json.load(f)
-            score = qr.get("overall_score", 0)
-            grade = qr.get("grade", "UNKNOWN")
-            print(f"  종합 점수: {score} ({grade})")
-            result.record("quality", "done", {"score": score, "grade": grade})
-        else:
-            result.record("quality", "done")
-    except Exception as e:
-        print(f"  ❌ 품질 점검 실패: {e}")
-        result.record("quality", "failed", {"error": str(e)})
-        raise
-
-
-def step_verify(result: PipelineResult):
-    """Step 4: 추천 여부와 AI 감성 분류의 일치 점검"""
-    print("\n" + "=" * 60)
-    print("🎯 [Step 4] 추천 여부와 AI 분류 일치 점검")
-    print("=" * 60)
-
-    verify_set = cfg.project_file("verify_set.csv")
-    if (os.path.exists(cfg.VERIFY_JSON) and os.path.exists(verify_set)
-            and os.path.getmtime(verify_set) >= os.path.getmtime(cfg.ANALYSIS_CSV)):
-        result.record("verify", "skipped", {"reason": "기존 분석 검증 재사용"})
-        return
-    try:
-        from verify_analysis import main as verify_main
-        verify_main()
-        if os.path.exists(cfg.VERIFY_JSON):
-            with open(cfg.VERIFY_JSON, "r", encoding="utf-8") as f:
-                vr = json.load(f)
-            agreement = vr.get("agreement_or_mixed_pct", vr.get("accuracy_lenient_pct", 0))
-            print(f"  추천 여부 일치 또는 혼합/중립: {agreement}%")
-            result.record("verify", "done", {"agreement_or_mixed_pct": agreement})
-        else:
-            result.record("verify", "done")
-    except Exception as e:
-        print(f"  ❌ 신뢰도 검증 실패: {e}")
-        result.record("verify", "failed", {"error": str(e)})
-        raise
-
-
 def step_insights(result: PipelineResult):
-    """Step 5: 인사이트 요약 생성"""
+    """Step 3: 요약과 할 일 생성"""
     print("\n" + "=" * 60)
-    print("📊 [Step 5] 인사이트 요약 생성")
+    print("📊 [Step 3] 요약과 할 일 생성")
     print("=" * 60)
 
     try:
@@ -300,6 +264,7 @@ def step_insights(result: PipelineResult):
 
 
 _PIPELINE_LOCK = threading.Lock()
+RUNNING = {"app_id": None}   # 지금 이 프로그램 안에서 돌고 있는 분석. 기록은 "진행 중"인데 여기 없으면 프로그램이 꺼져서 끊긴 것이다
 
 
 def run_pipeline(app_id: int = None, lang: str = None, budget: float = None, target_error_pct: float = None, custom_sample_size: int = None, incremental: bool = False, model: str = None, since: str = None, sort: str = "recent") -> dict:
@@ -343,6 +308,10 @@ def _run_pipeline_unlocked(app_id: int = None, lang: str = None, budget: float =
 
     result = PipelineResult()
     result.incremental = incremental
+    result.request = {"app_id": cfg.APP_ID, "lang": cfg.LANG, "budget": cfg.BUDGET_USD,
+                      "target_error_pct": target_error_pct, "custom_sample_size": custom_sample_size,
+                      "incremental": incremental, "model": cfg.MODEL, "since": since or None, "sort": cfg.COLLECT_SORT}
+    RUNNING["app_id"] = cfg.APP_ID
     progress.report("collect", 0, None, force=True)   # 이전 실행의 진행 기록을 지운다
     result.save()
 
@@ -363,6 +332,9 @@ def _run_pipeline_unlocked(app_id: int = None, lang: str = None, budget: float =
         cfg.MODEL_JSON_MODE = model_info["json_schema"]
         cfg.MODEL_FREE = model_info["free"]   # 무료 모델은 분당 20회 한도에 맞춰 천천히 보낸다
         cfg.MODEL_CONTEXT_LENGTH = model_info["context_length"]
+        # 무료 모델은 붐비면 요청을 거절한다. 그때 대신 답할 무료 모델을 정해 둔다. 유료 모델은 대체하지 않는다(비용이 달라진다).
+        from model_catalog import free_fallbacks
+        cfg.MODEL_FALLBACKS = free_fallbacks(cfg.MODEL) if model_info["free"] else []
         activate_budget(model_info, cfg.BUDGET_USD)
         # Step 1: 리뷰 수집 (먼저 수행해야 견적 가능)
         step_collect(result)
@@ -374,11 +346,9 @@ def _run_pipeline_unlocked(app_id: int = None, lang: str = None, budget: float =
             result.finish()
             return result.to_dict()
 
-        # Step 2~5: 파이프라인 실행
+        # Step 2~3: 분석과 요약
         step_analyze(result)
         progress.report("finish", force=True)
-        step_quality(result)
-        step_verify(result)
         step_insights(result)
 
     except Exception as e:
@@ -387,6 +357,7 @@ def _run_pipeline_unlocked(app_id: int = None, lang: str = None, budget: float =
     finally:
         clear_budget()
         result.finish()
+        RUNNING["app_id"] = None
 
     # 결과 저장
     out_path = cfg.PIPELINE_RESULT

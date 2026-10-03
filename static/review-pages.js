@@ -27,7 +27,7 @@ window.ReviewPages = (() => {
   /* ---------------- 리뷰 원문 ---------------- */
   let rows = [], topics = [], filter, sort, shown, root;
 
-  const topicsOf = r => String(r.keywords || '').split('|').map(k => k.split('@')[0].trim()).filter(Boolean);
+  const topicsOf = r => String(r.keywords || '').split('|').filter(Boolean);
   const moodOf = r => MOODS.some(m => m.key === r.overall_sentiment) ? r.overall_sentiment : 'NEUTRAL';
   const isUp = r => !['0', 'false', 'False'].includes(String(r.voted_up));
   // Steam 리뷰의 꾸밈 표시([h1], [b], [list], [*] 등)를 걷어 내고 읽을 글만 남긴다.
@@ -228,7 +228,7 @@ window.ReviewPages = (() => {
           ? `<b>조건을 충족했습니다.</b> 확인한 리뷰 범위의 추천 비율을 표본에서 추정할 때 최대 오차는 95% 신뢰수준에서 ±${num(p.analyzed_margin)}%p입니다.`
           : `<b>통계적 오차로 해석할 수 없습니다.</b> ±${num(p.target)}%는 수집 건수를 정한 계획 기준입니다.`}</p>
         <ol class="rp-checks">${p.checks.map(c => `<li class="${c.ok ? 'is-ok' : 'is-no'}"><b>${c.ok ? '예' : '아니오'}</b><span>${esc(c.name)}<small>${esc(c.text)}</small></span></li>`).join('')}</ol>
-        ${p.kept ? '' : '<p class="rp-callout">무작위 정렬을 선택해도 수집 범위를 끝까지 확인하고 분석 가능한 글을 모두 분석해야 합니다.</p>'}
+        ${p.kept ? '' : '<p class="rp-callout">무작위로 뽑고, 범위를 끝까지 훑고, 계획한 만큼 모아야 오차범위를 말할 수 있습니다.</p>'}
         <p class="rp-note">이 오차는 수집 대상 리뷰의 추천 비율에만 해당합니다. 주제별 비율, AI 분류의 정확도, 리뷰를 쓰지 않은 유저는 포함하지 않습니다.</p>
       </section>`;
   }
@@ -279,7 +279,7 @@ window.ReviewPages = (() => {
         ${cardHead('AI 사용량', `합계 ${num(total)} 토큰${cost ? ` · 설정 단가 기준 약 $${cost.toFixed(cost < 1 ? 3 : 2)}` : ''}`, 'spark')}
         <div class="rp-split">${stages.map(([k, label], i) => `<i class="use-${i}" style="flex:${tokens(k)} 1 0" title="${label} ${num(tokens(k))} 토큰"></i>`).join('')}</div>
         <div class="rp-use-list">${stages.map(([k, label], i) => `<span><i class="use-${i}"></i>${label} <b>${num(u[k].calls)}회</b> · ${num(tokens(k))} 토큰</span>`).join('')}</div>
-        <p class="rp-note">모델 ${esc(u.model || '')}. 본문이 같은 리뷰는 한 번만 보내고, 긴 리뷰는 앞·끝만 보내 토큰을 줄입니다.</p>
+        <p class="rp-note">모델 ${esc(u.model || '')}.${u.stand_ins ? ` 이 모델이 붐빌 때 ${Object.entries(u.stand_ins).map(([name, count]) => `${esc(name)}이(가) ${num(count)}번`).join(', ')} 대신 답했습니다.` : ''} 본문이 같은 리뷰는 한 번만 보내고, 긴 리뷰는 앞·끝만 보내 토큰을 줄입니다.</p>
       </section>`;
   }
 

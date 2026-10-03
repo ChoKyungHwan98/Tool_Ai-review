@@ -29,7 +29,7 @@ def estimate_remaining(config, app_id=None):
     if reviews_path.exists():
         with reviews_path.open(encoding="utf-8-sig", newline="") as stream:
             rows = {str(row["recommendationid"]): row for row in csv.DictReader(stream)}
-    from analyze_reviews_v3 import needs_deep, should_classify, MIN_LEN_C
+    from analyze_reviews_v3 import needs_deep, should_classify, themes_are_current, MIN_LEN_C
     eligible = {rid: row for rid, row in rows.items() if should_classify(row)}
     classified = {rid: item for rid, item in _items(folder / "analysis_v3.jsonl").items() if rid in eligible}
     deep_done = _items(folder / "complaints_v3.jsonl")
@@ -41,7 +41,14 @@ def estimate_remaining(config, app_id=None):
         except (OSError, ValueError):
             pass
     model_changed = bool(previous_model and previous_model != config.MODEL)
-    if model_changed:
+    themes_stale = False
+    themes_path = folder / "themes_v3.json"
+    if themes_path.exists():
+        try:
+            themes_stale = not themes_are_current(json.loads(themes_path.read_text(encoding="utf-8")))
+        except (OSError, ValueError):
+            themes_stale = True
+    if model_changed or themes_stale:
         classified = {}
         deep_done = {}
     # Stage C follows the first classification. Positives with a negative topic remain eligible.
@@ -51,17 +58,13 @@ def estimate_remaining(config, app_id=None):
     deep_ratio = len(deep_targets) / len(classified) if classified else 0.25
     pending_long = sum(len(eligible[rid]["content"]) >= MIN_LEN_C for rid in eligible.keys() - classified.keys())
     expected_new_c = math.ceil(pending_long * deep_ratio)
-    needs_a = pending_b > 0 and (model_changed or not (folder / "themes_v3.json").exists())
-    needs_d = bool(eligible) and (model_changed or pending_b > 0 or pending_c > 0 or not (folder / "summary_v5_cache.json").exists())
-    verify_set = folder / "verify_set.csv"
-    analysis_csv = folder / "analysis_v3.csv"
-    needs_verify = bool(eligible) and (model_changed or not (folder / "verify_report.json").exists() or
-        not verify_set.exists() or (analysis_csv.exists() and verify_set.stat().st_mtime < analysis_csv.stat().st_mtime))
+    needs_a = pending_b > 0 and (model_changed or themes_stale or not themes_path.exists())
+    needs_d = bool(eligible) and (model_changed or themes_stale or pending_b > 0 or pending_c > 0 or not (folder / "summary_v5_cache.json").exists())
 
     # Conservative per-review allowances. They estimate a budget, not provider billing.
     # B sends 15 clipped reviews per call and C sends 5, so the fixed instructions are shared by more reviews.
-    input_tokens = (12000 if needs_a else 0) + pending_b * 130 + (pending_c + expected_new_c) * 210 + (3500 if needs_d else 0) + (30000 if needs_verify else 0)
-    output_tokens = (1500 if needs_a else 0) + pending_b * 90 + (pending_c + expected_new_c) * 180 + (900 if needs_d else 0) + (6000 if needs_verify else 0)
+    input_tokens = (32000 if needs_a else 0) + pending_b * 145 + (pending_c + expected_new_c) * 210 + (3500 if needs_d else 0)
+    output_tokens = (5000 if needs_a else 0) + pending_b * 90 + (pending_c + expected_new_c) * 180 + (900 if needs_d else 0)
     estimated_usd = round((input_tokens * config.MODEL_COST_INPUT +
                            output_tokens * config.MODEL_COST_OUTPUT) / 1_000_000, 4)
     return {
@@ -70,8 +73,7 @@ def estimate_remaining(config, app_id=None):
         "already_done": len(classified), "to_analyze": pending_b,
         "deep_targets": len(deep_targets), "deep_done": len(deep_targets & deep_done.keys()),
         "to_deep": pending_c, "expected_new_deep": expected_new_c,
-        "needs_verify": needs_verify,
-        "model_changed": model_changed,
+        "model_changed": model_changed, "themes_stale": themes_stale,
         "estimated_input_tokens": input_tokens, "estimated_output_tokens": output_tokens,
         "model": config.MODEL, "estimated_usd": estimated_usd,
         "budget_usd": config.BUDGET_USD,

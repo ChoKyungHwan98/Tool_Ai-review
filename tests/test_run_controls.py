@@ -31,6 +31,28 @@ class RunControlsTests(unittest.TestCase):
         self.assertEqual((models[1]["input_cost"], models[1]["output_cost"]), (1.0, 2.0))
         self.assertTrue(models[1]["json_schema"])
 
+    def test_busy_free_model_has_stand_ins_and_paid_model_does_not(self):
+        import openrouter_limits as limits
+        free = lambda model_id: {"id": model_id, "free": True, "json_schema": True, "context_length": 200000}
+        catalog = [
+            free("a/gem-4-26b-it:free"), free("a/gem-4-31b-it:free"),
+            free("a/music-3-preview"),                      # 가격은 0이지만 글 분석용이 아니다
+            free("b/tron-3-super-120b:free"),
+            free("b/tron-3-nano-30b-reasoning:free"),       # 이름에 30b가 있어도 작은·추론 모델은 뺀다
+            free("c/lfm-2.5-2.6b:free"),                    # 너무 작다
+            free("openrouter/free"),                        # 어떤 모델로 갈지 모르는 라우터는 쓰지 않는다
+            {"id": "b/paid-70b", "free": False, "json_schema": True, "context_length": 100000},
+        ]
+        with patch.object(model_catalog, "list_models", return_value=catalog):
+            self.assertEqual(model_catalog.free_fallbacks("a/gem-4-26b-it:free"), ["a/gem-4-31b-it:free", "b/tron-3-super-120b:free"])
+        self.assertEqual([model_catalog.model_size(x) for x in ("g/gemma-4-26b-a4b-it:free", "l/lfm-2.5-2.6b:free", "x/no-size:free")], [26, 2.6, 0])
+        with patch.object(limits.cfg, "MODEL", "a/small:free"), patch.object(limits.cfg, "MODEL_FREE", True, create=True), \
+             patch.object(limits.cfg, "MODEL_FALLBACKS", ["a/big:free", "b/other:free"], create=True):
+            self.assertEqual(limits.model_fields(), {"models": ["a/small:free", "a/big:free", "b/other:free"]})
+        with patch.object(limits.cfg, "MODEL", "b/paid"), patch.object(limits.cfg, "MODEL_FREE", False, create=True), \
+             patch.object(limits.cfg, "MODEL_FALLBACKS", [], create=True):
+            self.assertEqual(limits.model_fields(), {"model": "b/paid"})
+
     def test_budget_guard_reserves_parallel_calls_and_stops_before_dispatch(self):
         guard = BudgetGuard(limit_usd=0.003, input_per_million=1, output_per_million=1)
         messages = [{"role": "user", "content": "짧은 리뷰"}]
@@ -89,7 +111,6 @@ class RunControlsTests(unittest.TestCase):
             stats = main.review_population_stats(1, "english")
         self.assertEqual(requested, ["english", "all"])
         self.assertEqual(stats["selected"]["neg_rate"], 50)
-        self.assertIsNone(stats["korean"])
 
     def test_sample_preview_uses_the_collectors_conservative_formula(self):
         answers = iter([
@@ -103,9 +124,13 @@ class RunControlsTests(unittest.TestCase):
             return response
         with patch("httpx.get", side_effect=fake_get):
             stats = main.review_population_stats(1, "english")
-        self.assertEqual(stats["sample_design"]["p_applied"], 0.5)
-        self.assertEqual(stats["sample_design"]["cochran_5pct"], 370)
-        self.assertEqual(stats["sample_design"]["sample_5pct"], 370)
+        import collect_reviews
+        plan = next(p for p in stats["plans"] if p["margin"] == 5)
+        self.assertEqual((plan["cochran"], plan["actual"], plan["min_neg_driven"]), (370, 370, False))
+        # 화면에 보여 준 건수와 수집기가 실제로 정하는 건수는 같은 함수에서 나온다
+        pop = {"total": 10000, "positive": 7000, "negative": 3000}
+        with patch.object(collect_reviews.cfg, "TARGET_ERROR_PCT", 5), patch.object(collect_reviews.cfg, "CUSTOM_SAMPLE_SIZE", None):
+            self.assertEqual(collect_reviews.decide_sample_size(pop)["n_total"], plan["actual"])
 
 
 if __name__ == "__main__":

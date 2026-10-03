@@ -47,6 +47,18 @@ async def await_turn():
     await asyncio.sleep(_delay())
 
 
+def model_fields():
+    """요청에 넣을 모델 지정. 무료 모델은 붐빌 때 대신 답할 모델을 같이 보낸다(OpenRouter의 models 배열)."""
+    fallbacks = getattr(cfg, "MODEL_FALLBACKS", None) or []
+    return {"models": [cfg.MODEL, *fallbacks]} if fallbacks and is_free() else {"model": cfg.MODEL}
+
+
+def answer_room(max_tokens):
+    """답 길이 한도. 무료 모델 중에는 답을 쓰기 전에 '생각'에 토큰을 쓰는 모델이 있어, 한도가 빠듯하면 답이 비어서 온다.
+    무료 모델은 비용이 없으므로 네 배로 넉넉히 준다."""
+    return max_tokens * 4 if is_free() else max_tokens
+
+
 def daily_limit_hit(text):
     text = (text or "").lower()
     return "per-day" in text or "per day" in text or "free-models-per-day" in text

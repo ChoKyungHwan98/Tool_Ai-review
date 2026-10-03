@@ -44,7 +44,6 @@
 .rp-card-head > .rd-icon { display:none; }
 .rp-empty { margin:0; text-align:center; color:var(--rp-sub); font-size:14px; padding:36px 12px; }
 .rp-note { margin:12px 0 0; font-size:13px; line-height:1.5; color:var(--rp-sub); }
-.rp-muted { color:var(--rp-sub); }
 
 /* ---------- 공통 조작: 글자 버튼 · 칩 · 전환 · 입력 ---------- */
 .rp-text-btn { justify-self:start; border:0; background:none; padding:2px 0; color:var(--rp-pos-ink); font-size:14px; }
@@ -109,7 +108,6 @@
 .rp-use-list i.use-0 { background:#2794EB; } .rp-use-list i.use-1 { background:#6382D8; } .rp-use-list i.use-2 { background:#8D61A5; } .rp-use-list i.use-3 { background:#00AC9A; }
 .rp-use-list b { color:var(--rp-ink); font-weight:600; }
 .rp-bal { display:grid; gap:16px; }
-.rp-bal-check { margin-top:16px; padding-top:16px; border-top:1px solid var(--rp-grid); }
 .rp-bal-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:end; gap:6px 12px; }
 .rp-bal-label b { display:block; font-size:14px; font-weight:500; color:var(--rp-ink); }
 .rp-bal-label small { font-size:13px; color:var(--rp-sub); }

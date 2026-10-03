@@ -1,17 +1,11 @@
-"""현재 인사이트 — 기획자가 바로 쓰는 결론.
+"""요약과 할 일 — 화면이 집계하지 못하는 두 가지만 만든다.
 
-추천률은 Steam 원자료를 사용하고, 리뷰에서만 알 수 있는 내용을 집계한다.
+  요약     기획자가 읽을 한 문단 (AI 한 번 호출, 실패하면 규칙 문장)
+  할 일    비추천 쪽으로 기운 주제 최대 5개의 문제 / 원인 / 유저 제안
 
-  범위     전체 중 몇 건을 모았고 몇 건을 AI가 읽었나
-  연관 차이   주제가 붙은 리뷰 중 이 주제를 빼면 추천률이 몇 %p 바뀌나
-  재미     추천한 유저가 느낀 재미 종류 (MDA 8가지)
-  누가     플레이 시간 구간별 추천률과 주요 불만
-  할 일    추천률을 가장 많이 깎는 주제 최대 5개 — 문제 / 원인 / 유저 제안
-
-짧은 리뷰도 추천 여부 집계에는 넣는다. 빼면 칭찬이 빠져서 결과가 실제보다 나빠진다.
+건수와 비율은 여기서 따로 세지 않는다. dashboard_evidence가 읽고 합친 것과 같은 자료·같은 규칙을 쓴다.
 """
 
-import csv
 import hashlib
 import json
 import os
@@ -21,209 +15,85 @@ from datetime import datetime
 
 import httpx
 import analysis_design
+import dashboard_evidence as evidence
 import openrouter_limits as limits
 from budget_control import current as current_budget
-from dotenv import load_dotenv
 
 sys.stdout.reconfigure(encoding="utf-8")
-load_dotenv()
 from config import cfg
-from analyze_reviews_v3 import FUN_TYPES, clean_json, should_classify
 
 SMALL = 30             # 이보다 적은 구간은 "표본 적음"
-MIN_THEME = 5          # 이보다 적게 언급된 주제는 영향도 순위에서 뺀다
-PLAYTIME_BUCKETS = [(0, 2, "2시간 미만"), (2, 20, "2~20시간"), (20, 100, "20~100시간"), (100, 10 ** 9, "100시간 이상")]
+MIN_THEME = 5          # 이보다 적게 언급된 주제는 순위에서 뺀다
 
 
 def path(name):
-    return os.path.join(os.path.dirname(cfg.ANALYSIS_CSV), name)
-
-
-def is_up(v):
-    return str(v).lower() in ("1", "true")
-
-
-def read_jsonl(p):
-    if not os.path.exists(p):
-        return []
-    with open(p, "r", encoding="utf-8") as f:
-        return [json.loads(line) for line in f if line.strip()]
+    return os.path.join(cfg.project_dir(), name)
 
 
 def load():
-    with open(cfg.REVIEWS_CSV, "r", encoding="utf-8-sig", newline="") as f:
-        reviews = list(csv.DictReader(f))
-    analyzed = read_jsonl(path("analysis_v3.jsonl"))
-    complaints = read_jsonl(path("complaints_v3.jsonl"))
-    with open(path("themes_v3.json"), "r", encoding="utf-8") as f:
-        themes = json.load(f)
-    design = {}
-    if os.path.exists(path("sample_design.json")):
-        with open(path("sample_design.json"), "r", encoding="utf-8") as f:
-            design = json.load(f)
+    """(리뷰, AI 분류, 불만 메모, 주제 설명, 수집 설계). 화면 집계와 같은 읽기 함수를 쓴다."""
+    source = evidence.load_sources(path(""))
+    if source is None:
+        raise FileNotFoundError("reviews.csv 또는 analysis_v3.jsonl이 없습니다. 수집과 분석을 먼저 실행하세요.")
+    reviews, analyzed, design, _, complaints = source
+    themes = []
+    if os.path.exists(path("themes_v3.json")):
+        with open(path("themes_v3.json"), "r", encoding="utf-8") as f:
+            themes = json.load(f)
     return reviews, analyzed, complaints, themes, design
-
-
-def hours(r):
-    value = r.get("playtime_at_review_min")
-    try:
-        minutes = float(value) if value not in (None, "") else None
-    except (TypeError, ValueError):
-        minutes = None
-    return minutes / 60 if minutes is not None and minutes >= 0 else None
-
-
-REQUEST_MARKS = ("해주", "해 주", "해라", "했으면", "좋겠", "추가", "수정", "개선", "희망", "부탁",
-                 "늘려", "줄여", "바꿔", "복구", "지원", "넣어", "고쳐", "상향", "하향", "가능하게")
-VAGUE = ("버그 개선 희망", "버그 좀 수정해주세요", "고쳐주셨으면 합니다", "편의성 개선", "개선 부탁")
-
-
-def is_request(text):
-    t = text.strip()
-    return any(m in t for m in REQUEST_MARKS) and t not in VAGUE and len(t) >= 6
-
-
-def pick_quote(ids, text_of, votes_of, used=None):
-    """공감을 많이 받은, 너무 짧지도 길지도 않은 원문 한 줄. used에 든 리뷰는 건너뛴다."""
-    best = None
-    for i in sorted(ids):
-        if used is not None and i in used:
-            continue
-        t = " ".join((text_of.get(i) or "").split())
-        if not 10 <= len(t) <= 160:
-            continue
-        key = (votes_of.get(i, 0), -abs(len(t) - 60))
-        if best is None or key > best[0]:
-            best = (key, t, i)
-    if best is None:
-        return ""
-    if used is not None:
-        used.add(best[2])
-    t = best[1]
-    return t if len(t) <= 90 else t[:88] + "…"
 
 
 def build():
     reviews, analyzed, complaints, themes, design = load()
-    reviews_by_id = {str(r["recommendationid"]): r for r in reviews}
-    analyzed = list({str(a["id"]): a for a in analyzed if str(a.get("id")) in reviews_by_id}.values())
-    pop_rate = (design.get("population") or {}).get("pos_rate")
+    members, alias, _, _ = evidence.merged_topics(analyzed)
+    up = {rid: evidence.is_positive(row) for rid, row in reviews.items()}
 
-    text_of = {r["recommendationid"]: r["content"] for r in reviews}
-    votes_of = {r["recommendationid"]: int(r.get("votes_up") or 0) for r in reviews}
-
-    n_collected = len(reviews)
-    n_short = sum(not should_classify(r) for r in reviews)
-    n_analyzed = len(analyzed)
-    analyzed_ids = {str(a["id"]) for a in analyzed}
-    n_missing_eligible = sum(should_classify(r) and str(r["recommendationid"]) not in analyzed_ids
-                             for r in reviews)
-    complaint_ids = {a["id"] for a in analyzed if not a["up"]}
-    population = design.get("population") or {}
-
-    # ── 주제별 언급·영향도 ────────────────────────────────────────
-    by_theme = defaultdict(lambda: {"ids": set(), "pos": set(), "neg": set()})
-    for a in analyzed:
-        for name, s in a.get("t") or []:
-            if name == "기타" or s not in ("P", "N"):
-                continue
-            by_theme[name]["ids"].add(a["id"])
-            (by_theme[name]["pos"] if s == "P" else by_theme[name]["neg"]).add(a["id"])
-    members = {name: {"P": d["pos"], "N": d["neg"]} for name, d in by_theme.items()}
-    alias, _ = analysis_design.auto_merge(members)
-    merged = analysis_design.merge_members(members, alias)
-    by_theme = {name: {"ids": g["P"] | g["N"], "pos": g["P"], "neg": g["N"]}
-                for name, g in merged.items()}
-    up_of = {rid: is_up(row["voted_up"]) for rid, row in reviews_by_id.items()}
-    themed_ids = set().union(*(d["ids"] for d in by_theme.values())) if by_theme else set()
-    themed_rate = (sum(up_of[rid] for rid in themed_ids) / len(themed_ids)) if themed_ids else 0
-
-    theme_rows = []
-    used_pos, used_neg = set(), set()
-    # 많이 언급된 주제가 먼저 좋은 인용문을 가져간다
-    theme_meta = {t["name"]: t for t in themes}
-    for name in sorted(by_theme, key=lambda n: (-len(by_theme[n]["ids"]), n)):
-        t = theme_meta.get(name, {})
-        d = by_theme[name]
-        # 같은 분류 단계에 들어온 리뷰끼리 비교한다. 전체 수집 리뷰를 섞으면
-        # 주제가 붙을 확률 자체가 비추천 여부에 따라 다른 선택 편향이 생긴다.
-        other_ids = themed_ids - d["ids"]
-        without = sum(up_of[i] for i in other_ids) / len(other_ids) if other_ids else themed_rate
-        theme_rows.append({
-            "name": name,
-            "desc": t.get("desc", ""),
-            "mentions": len(d["ids"]),
-            "pos": len(d["pos"]),
-            "neg": len(d["neg"]),
-            "impact": round((themed_rate - without) * 100, 2),
-            "small": len(d["ids"]) < MIN_THEME,
-            "quote_pos": pick_quote(d["pos"], text_of, votes_of, used_pos),
-            "quote_neg": pick_quote(d["neg"], text_of, votes_of, used_neg),
-        })
-    ranked = [t for t in theme_rows if not t["small"]]
+    # ── 주제와 추천 여부의 연관 ────────────────────────────────────
+    # 주제가 붙은 리뷰끼리만 견준다. 수집 전체와 견주면, 주제가 붙는 글(길고 불만이 많은 글)과
+    # 안 붙는 글("갓겜" 같은 짧은 추천)의 차이가 주제의 차이처럼 보인다.
+    themed = set().union(*(g["P"] | g["N"] for g in members.values())) if members else set()
+    themed_rate = sum(up[rid] for rid in themed) / len(themed) if themed else 0
+    desc = {t.get("name"): t.get("desc", "") for t in themes}
+    rows = []
+    for name, group in members.items():
+        ids = group["P"] | group["N"]
+        others = themed - ids
+        without = sum(up[rid] for rid in others) / len(others) if others else themed_rate
+        rows.append({"name": name, "desc": desc.get(name, ""), "mentions": len(ids),
+                     "pos": len(group["P"]), "neg": len(group["N"]),
+                     "impact": round((themed_rate - without) * 100, 2)})
+    rows.sort(key=lambda t: (-t["mentions"], t["name"]))
+    ranked = [t for t in rows if t["mentions"] >= MIN_THEME]
     lifts = sorted([t for t in ranked if t["pos"] > t["neg"] * 2], key=lambda t: -t["pos"])[:3]
     # 불만이 몇 건 없는 주제는 추천률 차이가 음수여도 "할 일"로 올리지 않는다(적을 문제·원인이 없다).
     drags = sorted([t for t in ranked if t["impact"] < 0 and t["neg"] >= MIN_THEME], key=lambda t: t["impact"])[:5]
 
-    # ── 재미 종류 (추천·섞임 리뷰 기준) ────────────────────────────
-    liked = [a for a in analyzed if a.get("s") in ("P", "M")]
-    fun_count = Counter(x for a in liked for x in set(a.get("f") or []))
-    fun = [{"name": k, "desc": FUN_TYPES[k], "share": round(v / len(liked) * 100, 1)}
-           for k, v in fun_count.most_common() if k in FUN_TYPES] if liked else []
-
-    # ── 플레이 시간 구간 ──────────────────────────────────────────
-    analyzed_by_id = {a["id"]: a for a in analyzed}
+    # ── AI 요약에 건넬 사실: 재미 종류, 플레이 시간별 추천률 ──────────
+    liked = [a for a in analyzed.values() if a.get("s") in ("P", "M")]
+    fun_count = Counter(f for a in liked for f in set(a.get("f") or []) if f in evidence.FUN)
+    fun = [{"name": k, "desc": evidence.FUN[k], "share": round(v / len(liked) * 100, 1)}
+           for k, v in fun_count.most_common(4)]
     playtime = []
-    for lo, hi, label in PLAYTIME_BUCKETS:
-        group = [r for r in reviews if (h := hours(r)) is not None and lo <= h < hi]
-        if not group:
-            continue
-        rate = sum(is_up(r["voted_up"]) for r in group) / len(group)
-        neg_tags = Counter()
-        for r in group:
-            a = analyzed_by_id.get(r["recommendationid"])
-            if a:
-                neg_tags.update({analysis_design.resolve(name, alias) for name, s in a.get("t") or []
-                                 if s == "N" and name != "기타"})
-        playtime.append({
-            "label": label,
-            "n": len(group),
-            "rate": round(rate * 100, 1),
-            "small": len(group) < SMALL,
-            "top_neg": [{"name": k, "count": v} for k, v in neg_tags.most_common(2)],
-        })
+    for index, (_, _, label) in enumerate(evidence.BUCKETS):
+        group = [rid for rid, row in reviews.items() if evidence.bucket_index(row) == index]
+        if group:
+            playtime.append({"label": label, "n": len(group), "small": len(group) < SMALL,
+                             "rate": round(sum(up[rid] for rid in group) / len(group) * 100, 1)})
 
-    # ── 할 일 재료: 주제별 불만 원문 조각 ───────────────────────────
+    # ── 할 일 재료: 주제별 불만 메모 ────────────────────────────────
     parts_by_theme = defaultdict(lambda: {"prob": [], "why": [], "fix": []})
     for c in complaints:
         for p in c.get("p") or []:
+            if not isinstance(p, dict) or not p.get("t"):
+                continue
             for k in ("prob", "why", "fix"):
-                v = (p.get(k) or "").strip()
-                if v and (k != "fix" or is_request(v)):
-                    parts_by_theme[analysis_design.resolve(p.get("t"), alias)][k].append(v)
+                v = str(p.get(k) or "").strip()
+                if v and (k != "fix" or evidence.is_request(v)):
+                    parts_by_theme[analysis_design.resolve(p["t"], alias)][k].append(v)
 
-    result = {
-        "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "coverage": {
-            "population": population.get("total"),
-            "collected": n_collected,
-            "short": n_short,
-            "missing_eligible": n_missing_eligible,
-            "analyzed": n_analyzed,
-            "complaints": len(complaint_ids),
-        },
-        "rates": {
-            "steam": round(pop_rate * 100, 1) if pop_rate else None,
-            "collected": round(sum(1 for r in reviews if is_up(r["voted_up"])) / n_collected * 100, 1) if n_collected else None,
-        },
-        "themes": theme_rows,
-        "lifts": lifts,
-        "drags": drags,
-        "fun": fun[:4],
-        "playtime": playtime,
-    }
-    return result, parts_by_theme
-
+    pop_rate = (design.get("population") or {}).get("pos_rate")
+    return {"themes": rows, "lifts": lifts, "drags": drags, "fun": fun, "playtime": playtime,
+            "rates": {"steam": round(pop_rate * 100, 1) if pop_rate else None}}, parts_by_theme
 
 # ── 요약과 할 일: AI 한 번 호출. 실패하면 규칙으로 만든다 ──────────────
 
@@ -269,9 +139,9 @@ def summary_prompt(game, result, parts_by_theme):
 
 def ask_summary(game, result, parts_by_theme, prompt=None):
     body = {
-        "model": cfg.MODEL,
+        **limits.model_fields(),
         "temperature": 0.2,
-        "max_tokens": 900,
+        "max_tokens": limits.answer_room(900),
         "messages": [{"role": "system", "content": SYSTEM_D},
                      {"role": "user", "content": prompt if prompt is not None else summary_prompt(game, result, parts_by_theme)}],
     }
@@ -290,7 +160,7 @@ def ask_summary(game, result, parts_by_theme, prompt=None):
             usage_recorded = True
         text = data["choices"][0]["message"]["content"].strip()
         m = text[text.find("{"): text.rfind("}") + 1]
-        return json.loads(m or clean_json(text)), usage
+        return json.loads(m), usage
     finally:
         if guard and not usage_recorded:
             guard.finish(reservation)
@@ -361,32 +231,30 @@ def main():
         result["summary_source"] = "rule"
 
     actions = []
-    for rank, t in enumerate(result["drags"], 1):
+    for t in result["drags"]:
         a = actions_ai.get(t["name"], {})
         raw = parts_by_theme.get(t["name"], {})
-        actions.append({
-            "rank": rank,
-            "theme": t["name"],
-            "impact": t["impact"],
-            "mentions": t["mentions"],
-            "prob": a.get("prob") or (raw.get("prob") or [""])[0],
-            "why": a.get("why") or "",
-            "fix": [str(x)[:40] for x in (a.get("fix") or [])][:2],
-            "quote": t["quote_neg"],
-        })
-    result["actions"] = actions
+        actions.append({"theme": t["name"],
+                        "prob": a.get("prob") or (raw.get("prob") or [""])[0],
+                        "why": a.get("why") or "",
+                        "fix": [str(x)[:40] for x in (a.get("fix") or [])][:2]})
 
+    # 저장하는 것은 화면이 읽는 것뿐이다. 건수와 비율은 화면을 열 때 dashboard_evidence가 다시 센다.
+    saved = {"generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+             "summary": result["summary"], "summary_source": result["summary_source"],
+             "summary_cached": result.get("summary_cached", False),
+             "themes": [{"name": t["name"], "desc": t["desc"]} for t in result.get("themes", [])],
+             "actions": actions}
     usage_path = path("usage_v3.json")
     if os.path.exists(usage_path):
         with open(usage_path, "r", encoding="utf-8") as f:
-            result["usage"] = json.load(f)
+            saved["usage"] = json.load(f)
 
     out = path("insights_v5.json")
     with open(out, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=2)
+        json.dump(saved, f, ensure_ascii=False, indent=2)
     print(f"v5 인사이트 저장: {out}")
-    return result
-
+    return saved
 
 if __name__ == "__main__":
     main()
