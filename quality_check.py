@@ -7,7 +7,8 @@
 1. 완전성 (Completeness)  ─ 결측치/빈 필드 비율
 2. 일관성 (Consistency)    ─ voted_up과 sentiment 라벨 정합성
 3. 대표성 (Representativeness) ─ 표본 비율 vs 모집단 비율 일치도
-4. 정확도 (Accuracy)        ─ 짧은 리뷰/노이즈 제거 후 비율 + 중립 응답 비율
+4. 분석 가능성              ─ 짧은 리뷰/노이즈 제거 후 비율 + 중립 응답 비율
+   (정답과 견준 정확도가 아니다. 저장 파일의 키 이름 accuracy는 그대로 둔다)
 
 산출:
 - 콘솔: 4축 점수 + 종합 점수 (PASS ≥ 80, WARN 60-79, FAIL < 60)
@@ -49,6 +50,9 @@ WEIGHTS = {
     "representativeness": 0.0,
     "accuracy": 0.3125,
 }
+QUALITY_NOTE = "내부 자료 상태 점수입니다. 분석 누락을 다른 점수로 가리지 않도록 완료율로 상한을 둡니다. AI 정답률이나 통계적 신뢰도는 아닙니다."
+REPRESENTATIVENESS_NOTE = "추천 비율 비교만으로 표본 대표성을 검증할 수 없습니다. 시기·내용의 선택 편향은 남습니다"
+CONSISTENCY_NOTE = "추천 여부와 글의 감성이 다를 수 있으므로 불일치가 AI 오답을 뜻하지 않습니다"
 
 
 def rescore(report):
@@ -56,10 +60,20 @@ def rescore(report):
     dims = (report or {}).get("dimensions")
     if not dims:
         return report
+    dims = {key: dict(value) for key, value in dims.items()}
+    if "representativeness" in dims:
+        dims["representativeness"]["note"] = REPRESENTATIVENESS_NOTE
+    if "consistency" in dims:
+        dims["consistency"]["note"] = CONSISTENCY_NOTE
     overall = sum((dims.get(key) or {}).get("score", 0) * weight for key, weight in WEIGHTS.items())
+    completion = (dims.get("accuracy") or {}).get("analysis_completion_pct")
+    if completion is not None:
+        overall = min(overall, completion)
     grade, grade_kr = (("PASS", "통과") if overall >= PASS_THRESHOLD
                        else ("WARN", "주의") if overall >= WARN_THRESHOLD else ("FAIL", "실패"))
-    return {**report, "overall_score": round(overall, 1), "grade": grade, "grade_kr": grade_kr, "weights": WEIGHTS}
+    return {**report, "overall_score": round(overall, 1), "grade": grade,
+            "grade_kr": grade_kr, "weights": WEIGHTS, "dimensions": dims,
+            "metric_note": QUALITY_NOTE}
 
 # ─── 임계값 ────────────────────────────────────────────────────────────
 PASS_THRESHOLD = 80
@@ -111,7 +125,7 @@ def score_completeness(reviews: list, analysis: list) -> dict:
 
 # ─── 2. 일관성 ─────────────────────────────────────────────────────────
 def score_consistency(analysis: list) -> dict:
-    """voted_up과 overall_sentiment 라벨 정합성 검증
+    """voted_up과 overall_sentiment 라벨 일치 여부 점검. 불일치가 곧 오답은 아니다.
 
     규칙:
     - voted_up=1 → sentiment가 POSITIVE/MIXED여야 정상 (NEGATIVE면 불일치)
@@ -151,7 +165,7 @@ def score_consistency(analysis: list) -> dict:
         "inconsistent": inconsistent,
         "inconsistent_pct": round(inconsistent_pct, 2),
         "issues": issues,
-        "note": "voted_up과 sentiment가 다른 경우 = AI 분석이 유저 의도와 다르게 해석한 경우",
+        "note": CONSISTENCY_NOTE,
     }
 
 
@@ -178,14 +192,13 @@ def score_representativeness(reviews: list, population_pos_rate: float = None) -
                 "note": "모집단과의 차이를 계산하지 않았습니다"}
     diff_pct = abs(sample_pos_rate - population_pos_rate) * 100  # %p
 
-    # 의도적 over-sampling이라도 차이가 크면 점수 차감
-    # 30%p 이상 차이 = 큰 편향이지만 가중치 보정으로 해결 가능 → 50점
+    # 추천 비율의 차이만 기록한다. 일치해도 시기·작성자·내용의 대표성은 검증되지 않는다.
     # 5%p 이내 = 거의 모집단 비율 → 100점
     score = max(0, 100 - diff_pct * 1.5)
 
     if diff_pct > 25:
         issues.append(f"표본 추천 비율 {sample_pos_rate*100:.1f}% vs 실제 {population_pos_rate*100:.1f}% → "
-                      f"{diff_pct:.1f}%p 차이 (의도적 over-sampling, 편향 보정으로 해결)")
+                      f"{diff_pct:.1f}%p 차이 (추천 비율만 가중 보정 가능)")
 
     return {
         "score": round(score, 1),
@@ -193,40 +206,49 @@ def score_representativeness(reviews: list, population_pos_rate: float = None) -
         "population_pos_rate": round(population_pos_rate * 100, 2),
         "diff_pct_points": round(diff_pct, 2),
         "issues": issues,
-        "note": "의도적 비추천 추가 수집 → 차이는 의도된 결과 (편향 보정으로 모집단 비율 복원)",
+        "note": REPRESENTATIVENESS_NOTE,
     }
 
 
-# ─── 4. 정확도 ─────────────────────────────────────────────────────────
+# ─── 4. 분석 가능성 (키 이름은 accuracy) ─────────────────────────────────────────────────────────
 def score_accuracy(reviews: list, analysis: list) -> dict:
     """짧은/노이즈 리뷰 제거 비율 + 중립 응답 비율로 LLM 분석 품질 추정"""
     issues = []
     if not reviews or not analysis:
         return {"score": 0, "issues": ["데이터 부족"]}
 
-    # 짧은 리뷰 제거 효율
-    short_filtered = len(reviews) - len(analysis)
-    filter_pct = short_filtered / len(reviews) * 100 if reviews else 0
+    # 실제 원문 길이로 짧은 글을 센다. AI 호출 실패·누락을 짧아서 제외한 글로 세면 안 된다.
+    eligible = {str(r.get("recommendationid")) for r in reviews
+                if len((r.get("content") or "").strip()) >= cfg.MIN_REVIEW_LEN and r.get("recommendationid")}
+    analyzed_ids = {str(r.get("recommendationid")) for r in analysis if r.get("recommendationid")}
+    short_filtered = sum(len((r.get("content") or "").strip()) < cfg.MIN_REVIEW_LEN for r in reviews)
+    missing_eligible = len(eligible - analyzed_ids)
+    completion_pct = (len(eligible & analyzed_ids) / len(eligible) * 100) if eligible else 100
+    filter_pct = short_filtered / len(reviews) * 100
 
     # 중립 응답 비율 (LLM이 분류를 회피한 정도)
     sentiments = Counter(r.get("overall_sentiment", "") for r in analysis)
     neutral_pct = sentiments.get("NEUTRAL", 0) / len(analysis) * 100 if analysis else 100
 
     # 점수 계산
-    # - 짧은 리뷰 제거: 0~30% 적정 (너무 적거나 너무 많으면 감점)
+    # - 짧은 리뷰 제거: 30%를 넘으면 표본 효율 감점. 적게 걸러진 것은 감점 사유가 아니다.
     # - 중립 응답: < 10% 우수, > 30% 부진
-    filter_score = 100 - max(0, filter_pct - 30) * 2 if filter_pct <= 30 else 100 - (filter_pct - 30) * 2
+    filter_score = max(0, 100 - max(0, filter_pct - 30) * 2)
     neutral_score = max(0, 100 - max(0, neutral_pct - 10) * 3)
-    score = (filter_score + neutral_score) / 2
+    score = min((filter_score + neutral_score) / 2, completion_pct)
 
     if neutral_pct > 30:
         issues.append(f"중립 응답 {neutral_pct:.1f}% (기준 30% 이내) — LLM 분류 회피가 많음")
     if filter_pct > 50:
         issues.append(f"짧은 리뷰 제거 비율 {filter_pct:.1f}% — 표본 효율 낮음")
+    if missing_eligible:
+        issues.append(f"분석 가능한 리뷰 {missing_eligible}건이 AI 결과에서 누락됨")
 
     return {
         "score": round(score, 1),
         "short_filtered": short_filtered,
+        "missing_eligible": missing_eligible,
+        "analysis_completion_pct": round(completion_pct, 2),
         "filter_pct": round(filter_pct, 2),
         "neutral_response_pct": round(neutral_pct, 2),
         "issues": issues,
@@ -249,6 +271,7 @@ def run_quality_check() -> dict:
         + representativeness["score"] * WEIGHTS["representativeness"]
         + accuracy["score"] * WEIGHTS["accuracy"]
     )
+    overall = min(overall, accuracy.get("analysis_completion_pct", 100))
 
     if overall >= PASS_THRESHOLD:
         grade, grade_kr = "PASS", "통과"
@@ -259,6 +282,7 @@ def run_quality_check() -> dict:
 
     report = {
         "overall_score": round(overall, 1),
+        "metric_note": QUALITY_NOTE,
         "grade": grade,
         "grade_kr": grade_kr,
         "thresholds": {"pass": PASS_THRESHOLD, "warn": WARN_THRESHOLD},
@@ -278,7 +302,7 @@ def print_report(r: dict):
     print(f"데이터 품질 점검 — 종합 {r['overall_score']:.1f}점 [{r['grade_kr']}]")
     print("=" * 64)
     for key, kr in [("completeness", "완전성"), ("consistency", "일관성"),
-                    ("representativeness", "대표성"), ("accuracy", "정확도")]:
+                    ("representativeness", "대표성(점수 제외)"), ("accuracy", "분석 가능성")]:
         dim = r["dimensions"][key]
         w = r["weights"][key]
         print(f"\n[{kr}] {dim['score']:.1f}점  (가중치 {w*100:.0f}%)")

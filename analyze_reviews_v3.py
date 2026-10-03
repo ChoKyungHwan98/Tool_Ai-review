@@ -193,18 +193,20 @@ def load_reviews():
 
 
 def should_classify(row):
-    """Keep meaningful short complaints without paying to classify one-character votes."""
-    text = (row.get("content") or "").strip()
-    if len(text) >= cfg.MIN_REVIEW_LEN:
-        return True
-    if len(text) < 2:
-        return False
-    negative_vote = str(row.get("voted_up", "")).lower() in ("0", "false")
-    return negative_vote or any(cue in text.casefold() for cue in SHORT_COMPLAINT_CUES)
+    """두 글자 이상이면 추천·비추천을 가리지 않고 모두 분류한다.
+
+    예전에는 짧은 글 중 비추천이거나 불만 낱말이 있는 글만 남겼다. 그러면 짧은 추천 글만 빠져
+    분석 묶음이 불만 쪽으로 기운다(팰월드: 수집 4.8% → 분석 7.5%)."""
+    return len((row.get("content") or "").strip()) >= cfg.MIN_REVIEW_LEN
 
 
 def hours(row):
-    return round(int(row.get("playtime_at_review_min") or row.get("playtime_forever_min") or 0) / 60.0, 1)
+    value = row.get("playtime_at_review_min")
+    try:
+        minutes = float(value) if value not in (None, "") else None
+    except (TypeError, ValueError):
+        minutes = None
+    return round(minutes / 60.0, 1) if minutes is not None and minutes >= 0 else None
 
 
 def read_jsonl(p):
@@ -248,8 +250,10 @@ async def find_themes(client, long_rows):
         return themes
 
     rng = random.Random(42)
-    negatives = sorted([r for r in long_rows if r["voted_up"] in ("0", "False", "false")],
-                       key=lambda r: -len(r["content"]))[:60]
+    # 비추천도 추천과 같이 무작위로 고른다. 가장 긴 글만 고르면 길게 쓰는 사람의 주제만 목록에 오른다.
+    negatives = [r for r in long_rows if r["voted_up"] in ("0", "False", "false") and len(r["content"]) >= 20]
+    rng.shuffle(negatives)
+    negatives = negatives[:60]
     positives = [r for r in long_rows if r["voted_up"] not in ("0", "False", "false") and len(r["content"]) >= 20]
     rng.shuffle(positives)
     # Keep both recommendation groups represented, and fit the chosen model's context.
@@ -336,12 +340,13 @@ def analysis_row(src, res, area_of):
     row = {
         "recommendationid": src["recommendationid"],
         "voted_up": 1 if src["voted_up"] not in ("0", "False", "false") else 0,
-        "playtime_h": f"{hours(src):.1f}",
+        "playtime_h": f"{hours(src):.1f}" if hours(src) is not None else "",
         "content": src["content"][:500],
         "overall_sentiment": SENT_MAP.get(res.get("s"), "NEUTRAL"),
         "key_phrase": res.get("k", ""),
-        "confidence": "0.85",
-        "needs_verification": "false",
+        # 분류 단계는 신뢰도를 묻지 않는다. 임의의 고정 값을 기록하면 실제 확신도로 오해된다.
+        "confidence": "",
+        "needs_verification": "",
     }
     for a in ASPECTS:
         pairs = per_area[a]

@@ -1,6 +1,6 @@
 /* 개요 · 주제별 보기 · 칭찬 분석 화면. 한 화면이 질문 하나에 답한다.
    개요(#ovBody): 무엇을 얼마나 봤고 전체 반응은 어떤가 — 같은 모양 카드 5장, Steam 전체 리뷰의 날짜별 추천·비추천 차트, 글에 담긴 반응.
-   주제별 보기(#tpBody): 주제마다 칭찬과 불만이 얼마나 나왔나 — 주제 줄, 주제 지도, 선택한 주제의 근거.
+   주제별 보기(#tpBody): 주제마다 칭찬과 불만이 얼마나 나왔나 — 주제 줄, IPA 매트릭스, 선택한 주제의 근거.
    칭찬 분석(#chBody): 무엇을 칭찬하고 무엇을 즐겼나 — 칭찬이 많은 주제, 즐긴 것, 즐긴 것을 말한 리뷰.
    플레이 시간별 비추천율(#rdCohortChart)은 불만 분석 화면에 놓이고 여기서 그린다.
    배치는 LUNO 대학 대시보드(dashboard-university)의 줄 구성을 따른다.
@@ -11,6 +11,8 @@ window.ReviewDashboard = (() => {
   const num = x => x == null ? '—' : Number(x).toLocaleString('ko-KR');
   const pct = x => x == null ? '—' : `${Number(x).toFixed(1)}%`;
   const clamp = x => Math.max(0, Math.min(100, Number(x) || 0));
+  // 한 리뷰가 같은 주제에 칭찬과 불만을 모두 달 수 있으므로 감성 언급 수를 분모로 쓴다.
+  const themeNegShare = t => t.pos + t.neg ? t.neg / (t.pos + t.neg) : 0;
   const ICONS = {
     plus: '<path d="M12 5v14M5 12h14"/>',
     report: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/>',
@@ -117,7 +119,8 @@ window.ReviewDashboard = (() => {
         <section class="rd-pane rd-pane-mood" aria-labelledby="rdMoodTitle">
           <header class="rd-pane-head"><div><h2 id="rdMoodTitle">글에 담긴 반응</h2><p>AI가 분석한 리뷰 ${num(counts.analyzed)}건</p></div>${icon('pie')}</header>
           <div class="rd-pane-body is-center" id="rdMoodChart"></div>
-          <p class="rd-note">Steam의 추천 여부와 별개로, AI가 글 내용을 읽고 긍정 · 혼합 · 부정으로 나눈 결과입니다.</p>
+          <p class="rd-note">Steam의 추천 여부와 별개로, AI가 글 내용을 읽고 긍정 · 혼합 · 부정으로 나눈 결과입니다.${(() => { const up = evidence.counts?.vote_mood?.up; if (!up) return ''; const all = up.P + up.M + up.N + up.U;
+            return ` 추천한 글 ${num(all)}건 중 ${num(up.M + up.N)}건은 아쉬운 점도 함께 썼습니다. 그래서 추천 비율보다 긍정 비율이 낮습니다.`; })()}</p>
         </section>
       </div>`;
     // 제목 옆 작은 게임 그림
@@ -149,19 +152,20 @@ window.ReviewDashboard = (() => {
           </div>
         </section>
         <section class="rd-pane rd-pane-map" aria-labelledby="rdMapTitle">
-          <header class="rd-pane-head"><div><h2 id="rdMapTitle">주제 지도</h2><p>오른쪽 = 많이 언급 · 위 = 불만 비율 높음</p></div>${icon('matrix')}</header>
+          <header class="rd-pane-head"><div><h2 id="rdMapTitle">IPA 매트릭스</h2><p>오른쪽일수록 많이 언급 · 위일수록 불만 비율이 높음</p></div>${icon('matrix')}</header>
           <div class="rd-pane-body" id="rdMapChart"></div>
           <p class="rd-note">원을 누르면 아래 근거가 그 주제로 바뀝니다. 세로 점선은 언급 수 중앙값, 가로 점선은 불만 50%입니다. 원 크기도 언급 수입니다.</p>
         </section>
         <section class="rd-pane rd-focus" id="rdDetail" aria-live="polite" aria-label="선택한 주제의 근거"></section>
       </div>
       <dialog class="rd-dialog rd-method-dialog" id="rdMethodDialog" aria-labelledby="rdMethodTitle"><div class="rd-dialog-head"><div><h2 id="rdMethodTitle">분석 기준</h2><p>${num(counts.collected)}건 수집 · ${num(counts.analyzed)}건 AI 분석</p></div><button class="rd-btn" data-action="close-method" aria-label="분석 기준 닫기">닫기 ×</button></div><div class="rd-method-grid">
-        <p><b>주제별 칭찬과 불만</b><br>한 줄이 주제 하나입니다. 막대 길이는 그 주제를 칭찬(파랑)하거나 불만(보라)으로 언급한 AI 분석 리뷰 수이고, 언급이 많은 주제부터 위에 놓습니다. 오른쪽 숫자는 언급한 리뷰 수와 그중 불만 비율입니다.</p>
-        <p><b>주제 지도</b><br>가로축은 주제를 언급한 리뷰 수, 세로축은 그중 불만 비율입니다(중요도–성과 분석, IPA). 한 리뷰에 같은 주제의 칭찬과 불만이 함께 있어도 언급 수에는 한 번만 셉니다. 원 크기도 언급 수입니다. 세로 점선은 전체 주제의 언급 수 중앙값, 가로 점선은 불만 50%입니다. 언급 수가 네 배 이상 차이 나면 가로축을 로그 눈금으로 그립니다.</p>
+        <p><b>주제별 칭찬과 불만</b><br>한 줄이 주제 하나입니다. 막대 길이는 그 주제를 칭찬(파랑)하거나 불만(보라)으로 언급한 AI 분석 리뷰 수이고, 언급이 많은 주제부터 위에 놓습니다. 오른쪽 숫자는 언급한 리뷰 수와 칭찬·불만 언급 중 불만의 몫입니다.</p>
+        <p><b>"불확실" 표시</b><br>언급이 적으면 리뷰 몇 건에 따라 불만 비율이 50%를 넘기도 하고 못 넘기도 합니다. 이 건수에서 우연으로 흔들릴 수 있는 범위(90%, 주제 줄에 마우스를 올리면 보임)가 50%를 걸치면, 칭찬이 많은지 불만이 많은지 말할 수 없어 "불확실"로 적고 강조하지 않습니다. 건수가 적어 생기는 흔들림만 잰 것이고, 전체 유저의 비율에 대한 신뢰구간이 아닙니다. 최신순 수집의 치우침과 AI 분류 오류는 이 범위에 들어 있지 않습니다.</p>
+        <p><b>IPA 매트릭스</b><br>가로축은 주제를 언급한 리뷰 수, 세로축은 칭찬·불만 언급 중 불만의 몫입니다(중요도–성과 분석, IPA). 한 리뷰에 같은 주제의 칭찬과 불만이 함께 있으면 가로축에는 한 번, 세로축에는 각각 한 번씩 셉니다. 원 크기도 언급 리뷰 수입니다. 세로 점선은 전체 주제의 언급 수 중앙값, 가로 점선은 불만 50%입니다. 언급 수가 네 배 이상 차이 나면 가로축을 로그 눈금으로 그립니다.</p>
         <p><b>진하게 칠한 두 주제</b><br>칭찬이 더 많은 주제 중 칭찬 리뷰가 가장 많은 주제(파랑)와 불만이 더 많은 주제 중 불만 리뷰가 가장 많은 주제(보라)입니다. 살펴보기 시작할 곳을 표시한 것이고, 무엇을 고칠지는 원문을 읽고 사람이 판단합니다.</p>
         <p><b>날짜별 추천 · 비추천</b><br>개요의 차트는 우리가 수집한 리뷰가 아니라 Steam에 올라온 전체 리뷰(모든 언어)를 날짜별로 센 것입니다. 리뷰 수(파란 실선)는 왼쪽 눈금, 비추천 비율(보라 점선)은 오른쪽 눈금으로 읽습니다.</p>
         <p><b>수집 범위</b><br>최신순으로 수집한 리뷰입니다. 추천·비추천 비율을 맞춰도 전체 유저나 전체 기간의 무작위 표본이 되지는 않습니다. 리뷰는 자발적으로 작성한 의견입니다.</p>
-        <p><b>표본과 AI 분류</b><br>주제 수치는 AI가 원문을 분류한 결과입니다.${counts.themed != null ? ` 수집 ${num(counts.collected)}건 중 AI가 분석한 글은 ${num(counts.analyzed)}건이고, 그중 주제가 붙은 글은 ${num(counts.themed)}건입니다. 이 화면의 숫자는 그 ${num(counts.themed)}건에서 나옵니다.` : ''} 짧은 리뷰 등 ${num(counts.collected - counts.analyzed)}건은 주제 집계에 포함되지 않습니다. 플레이 시간별 비추천율은 수집 리뷰 전체의 Steam 추천 여부로 계산합니다.${counts.skipped_analysis ? ` 읽을 수 없거나 원문이 없는 분석 ${num(counts.skipped_analysis)}건 제외.` : ''}${evidence.merges?.length ? ` AI가 나눈 주제 중 같은 리뷰에 80% 이상 함께 붙은 ${num(evidence.merges.length)}개는 규칙으로 합쳤습니다(분석 방법 참고).` : ''}</p>
+        <p><b>표본과 AI 분류</b><br>주제 수치는 AI가 원문을 분류한 결과입니다.${counts.themed != null ? ` 수집 ${num(counts.collected)}건 중 AI가 분석한 글은 ${num(counts.analyzed)}건이고, 그중 주제가 붙은 글은 ${num(counts.themed)}건입니다. 이 화면의 숫자는 그 ${num(counts.themed)}건에서 나옵니다.` : ''} 너무 짧아 제외한 글 ${num(counts.short_excluded ?? (counts.collected - counts.analyzed))}건${counts.analysis_missing_eligible ? `, 분석 대상인데 결과가 없는 글 ${num(counts.analysis_missing_eligible)}건` : ''}은 주제 집계에 포함되지 않습니다. 플레이 시간별 비추천율은 수집 리뷰 전체의 Steam 추천 여부로 계산합니다.${counts.skipped_analysis ? ` 읽을 수 없거나 원문이 없는 분석 ${num(counts.skipped_analysis)}건 제외.` : ''}${evidence.merges?.length ? ` AI가 나눈 주제 중 같은 리뷰에 80% 이상 함께 붙은 ${num(evidence.merges.length)}개는 규칙으로 합쳤습니다(분석 방법 참고).` : ''}</p>
       </div></dialog>
       <dialog class="rd-dialog" id="rdEvidenceDialog" aria-labelledby="rdDialogTitle"><div class="rd-dialog-head"><div><h2 id="rdDialogTitle">리뷰 근거</h2><p id="rdDialogMeta"></p></div><button class="rd-btn" data-action="close-dialog" aria-label="리뷰 근거 닫기">닫기 ×</button></div><div class="rd-toggle" aria-label="주제 감성 선택"><button data-action="evidence-filter" data-sentiment="N">불만</button><button data-action="evidence-filter" data-sentiment="P">칭찬</button><button data-action="evidence-filter" data-sentiment="all">전체</button></div><div id="rdEvidenceBody" aria-live="polite"></div></dialog>`;
 
@@ -325,7 +329,7 @@ window.ReviewDashboard = (() => {
     target.setAttribute('aria-label', `${all ? '전체 기간' : '최근 30일'} Steam 리뷰 추이. 리뷰 ${num(sumAll)}건, 비추천 비율 ${pct(sumAll ? sumDown / sumAll * 100 : 0)}.`);
     const peak = rows.reduce((a, r) => r.up + r.down > a.up + a.down ? r : a, rows[0]);
     if (strip) strip.innerHTML = `<div><b>${num(sumAll)}건</b><small><i class="line pos"></i>리뷰 수</small></div>
-      <div><b>${pct(sumAll ? sumDown / sumAll * 100 : 0)}</b><small><i class="line neg"></i>비추천 비율${all ? '' : ' · 7일 평균'}</small></div>
+      <div><b>${pct(sumAll ? sumDown / sumAll * 100 : 0)}</b><small><i class="line neg"></i>기간 전체 비추천 비율</small></div>
       ${markCount ? `<div><b>${num(markCount)}건</b><small><i class="mark"></i>${patched ? '패치 공지' : '공지'}</small></div>` : ''}
       <div class="rd-strip-end"><b>${dots(monthly ? peak.date.slice(0, 7) : peak.date)}${all && !monthly ? ' 주' : ''}</b><small>리뷰가 가장 많은 ${monthly ? '달' : all ? '주' : '날'} · ${num(peak.up + peak.down)}건</small></div>`;
     target.innerHTML = '';
@@ -358,18 +362,25 @@ window.ReviewDashboard = (() => {
     trendCharts = []; trendStamp = '';
   }
 
-  // 주제 지도(IPA): x = 언급 수, y = 불만 비율, 원 크기 = 언급 수. 점선은 언급 수 중앙값과 불만 50%.
+  // IPA 매트릭스(IPA): x = 언급 수, y = 불만 비율, 원 크기 = 언급 수. 점선은 언급 수 중앙값과 불만 50%.
   function renderMap() {
     const target = document.getElementById('rdMapChart');
     if (!target) return;
     // 높이: 옆의 주제 줄 카드와 비슷하게 300~620px
-    const W = Math.max(300, target.clientWidth || 560);
-    const beside = document.getElementById('rdTopicChart')?.offsetHeight;
-    const H = W < 480 ? 320 : Math.round(Math.max(300, Math.min(620, beside ? beside + 24 : W * 1.05)));
+    // 그릴 폭은 카드 안쪽 여백을 뺀 값이다. 여백까지 넣으면 그림이 줄어들어 글자가 정한 크기보다 작아진다.
+    const inner = () => { const cs = getComputedStyle(target); return target.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight); };
+    const W = Math.max(300, inner() || 560);
+    const besideHeight = () => { const el = document.getElementById('rdTopicChart'); return el?.offsetHeight ? el.offsetHeight + (el.previousElementSibling?.offsetHeight || 0) + 8 : 0; };
+    const beside = besideHeight();
+    const H = W < 480 ? 320 : Math.round(Math.max(300, Math.min(620, beside || W * 1.05)));
+    requestAnimationFrame(() => {
+      const width = Math.max(300, inner() || W);
+      if (!renderMap.again && (Math.abs(width - W) > 8 || (W >= 480 && Math.abs(besideHeight() - beside) > 8))) { renderMap.again = true; renderMap(); renderMap.again = false; }
+    });
     target.innerHTML = mapSVG(W, H) || '<div class="rd-empty">분류된 주제가 아직 없습니다.</div>';
   }
 
-  // 주제 지도 SVG 문자열. 화면과 한 장 보고서가 같은 그림을 쓴다.
+  // IPA 매트릭스 SVG 문자열. 화면과 한 장 보고서가 같은 그림을 쓴다.
   // 가로 = 언급 수(중요도), 세로 = 불만 비율(성과의 반대). 기준선은 언급 수 중앙값과 불만 50%.
   function mapSVG(W, H) {
     const topics = evidence.themes.filter(t => t.mentions > 0);
@@ -394,7 +405,7 @@ window.ReviewDashboard = (() => {
     }
     const y = v => T + ph * (1 - v);
     const xm = x(median), ym = y(.5);
-    const share = t => t.neg / t.mentions;
+    const share = themeNegShare;
     // 넓은 화면에서 원만 작게 남지 않도록 차트 폭에 맞춰 키운다(최대 1.6배)
     const grow = Math.max(1, Math.min(1.3, W / 720));
     const radius = t => (9 + 18 * Math.sqrt(t.mentions / maxM)) * grow;
@@ -408,26 +419,26 @@ window.ReviewDashboard = (() => {
       || dots.some(d => { const nx = Math.max(b.x, Math.min(d.cx, b.x + b.w)), ny = Math.max(b.y, Math.min(d.cy, b.y + b.h)); return Math.hypot(d.cx - nx, d.cy - ny) < d.rad + 1; });
     // 네 영역. 오른쪽 = 언급 수 중앙값 이상, 위 = 불만 50% 초과
     const quads = [
-      {cls:'is-fix', text:'많이 언급 · 불만 우세', size:14, right:true, top:true},
-      {cls:'is-keep', text:'많이 언급 · 칭찬 우세', size:14, right:true, top:false},
-      {cls:'is-watch', text:'적게 언급 · 불만 우세', size:13, right:false, top:true},
-      {cls:'is-small', text:'적게 언급 · 칭찬 우세', size:13, right:false, top:false}].map(q => ({...q,
+      {cls:'is-fix', text:'많이 언급 · 불만 많음', size:14, right:true, top:true},
+      {cls:'is-keep', text:'많이 언급 · 칭찬 많음', size:14, right:true, top:false},
+      {cls:'is-watch', text:'적게 언급 · 불만 많음', size:13, right:false, top:true},
+      {cls:'is-small', text:'적게 언급 · 칭찬 많음', size:13, right:false, top:false}].map(q => ({...q,
         x0: q.right ? xm : L, x1: q.right ? W - R : xm, y0: q.top ? T : ym, y1: q.top ? ym : H - B,
         n: topics.filter(t => (t.mentions >= median) === q.right && (share(t) > .5) === q.top).length}));
-    // 영역 이름 + 주제 수. 자리가 모자라면 주제 수를 빼고 이름만 놓는다.
-    const quadLabels = quads.map(q => {
-      for (const count of [` ${q.n}개`, '']) {
-        const w = textW(q.text, q.size) + textW(count, 13), h = q.size + 4, pad = 8;
-        const mid = (q.y0 + q.y1 - h) / 2;
-        const corners = q.right
-          ? [[q.x1 - pad - w, q.y0 + pad], [q.x1 - pad - w, q.y1 - pad - h], [q.x0 + pad, q.y0 + pad], [q.x0 + pad, q.y1 - pad - h], [q.x1 - pad - w, mid], [q.x0 + pad, mid]]
-          : [[q.x0 + pad, q.y0 + pad], [q.x0 + pad, q.y1 - pad - h], [q.x1 - pad - w, q.y0 + pad], [q.x1 - pad - w, q.y1 - pad - h], [q.x0 + pad, mid], [q.x1 - pad - w, mid]];
-        const spot = corners.find(([bx, by]) => q.x1 - q.x0 > w + pad * 2 && !hits({x:bx, y:by, w, h}));
-        if (!spot) continue;
-        boxes.push({x:spot[0], y:spot[1], w, h});
-        return `<text class="rd-q-label ${q.cls}" x="${spot[0]}" y="${spot[1] + q.size}" font-size="${q.size}">${q.text}${count ? `<tspan class="rd-q-count">${count}</tspan>` : ''}</text>`;
-      }
-      return '';
+    // 영역 이름: 네 칸 모두 같은 크기의 바탕 글자. 칸 안에서 원과 겹치지 않는 자리를 찾아 놓고,
+    // 주제 이름이 그 위에 올라오지 않도록 자리를 맡아 둔다.
+    const QUAD_TITLE = {'is-fix': '집중 개선', 'is-keep': '유지 강화', 'is-watch': '낮은 우선순위', 'is-small': '작은 강점'};
+    const narrowest = Math.min(...quads.map(q => q.x1 - q.x0));
+    const quadSize = [24, 20, 18, 16].find(size => textW('낮은 우선순위', size) + 16 <= narrowest) || 0;
+    const quadLabels = !quadSize ? '' : quads.map(q => {
+      const title = QUAD_TITLE[q.cls], w = textW(title, quadSize), h = quadSize + 6, pad = 10;
+      const xs = [(q.x0 + q.x1 - w) / 2, q.right ? q.x1 - pad - w : q.x0 + pad, q.right ? q.x0 + pad : q.x1 - pad - w];
+      const ys = [(q.y0 + q.y1 - h) / 2, q.y0 + (q.y1 - q.y0) * .25 - h / 2, q.y0 + (q.y1 - q.y0) * .75 - h / 2, q.y0 + pad, q.y1 - pad - h];
+      const spots = ys.flatMap(by => xs.map(bx => ({x: bx, y: by, w, h})));
+      const inside = b => b.x >= q.x0 && b.x + b.w <= q.x1 && b.y >= q.y0 && b.y + b.h <= q.y1;
+      const box = spots.find(b => inside(b) && !hits(b)) || spots[0];
+      boxes.push(box);
+      return `<text class="rd-q-label ${q.cls}" x="${box.x + w / 2}" y="${box.y + quadSize}" text-anchor="middle" font-size="${quadSize}">${title}</text>`;
     }).join('');
     const order = [...dots].sort((a,b) => hero(b.r) - hero(a.r) || (b.t.name === selected) - (a.t.name === selected) || b.t.mentions - a.t.mentions);
     order.forEach(d => {
@@ -450,10 +461,10 @@ window.ReviewDashboard = (() => {
       }
     });
     const tick = (tx, ty, str, anchor = 'end') => `<text class="rd-map-tick" x="${tx}" y="${ty}" text-anchor="${anchor}">${str}</text>`;
-    const axisName = W < 480 ? (logScale ? '언급 수 · 로그 눈금' : `${num(xMax)}건`) : logScale ? '언급 리뷰 수 → · 로그 눈금 · 원 크기도 언급 수' : `언급 리뷰 수 → ${num(xMax)}건 · 원 크기도 언급 수`;
+    const axisName = W < 480 ? (logScale ? '언급 수 · 로그 눈금' : `${num(xMax)}건`) : logScale ? '언급 리뷰 수 →' : `언급 리뷰 수 → ${num(xMax)}건`;
     const xGrid = xTicks.map(v => `<line x1="${x(v)}" x2="${x(v)}" y1="${T}" y2="${H - B}" class="rd-map-grid"/>`).join('');
     const xTickText = xTicks.filter(v => Math.abs(x(v) - xm) > 26).map(v => tick(x(v), H - B + 16, num(v), 'middle')).join('');
-    return `<svg class="rd-map" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="group" aria-label="주제 지도: 언급 수와 불만 비율">
+    return `<svg class="rd-map" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="group" aria-label="IPA 매트릭스: 언급 수와 불만 비율">
       <defs>
         <linearGradient id="rdQFix" x1="1" y1="0" x2="0" y2="1"><stop offset="0" class="rd-q-stop-fix" stop-opacity=".09"/><stop offset="1" class="rd-q-stop-fix" stop-opacity=".03"/></linearGradient>
         <linearGradient id="rdQKeep" x1="1" y1="1" x2="0" y2="0"><stop offset="0" class="rd-q-stop-keep" stop-opacity=".09"/><stop offset="1" class="rd-q-stop-keep" stop-opacity=".03"/></linearGradient>
@@ -481,12 +492,12 @@ window.ReviewDashboard = (() => {
     if (!topics.length) { target.innerHTML = '<div class="rd-empty">분류된 주제가 아직 없습니다.</div>'; return; }
     const max = Math.max(...topics.map(t => t.pos + t.neg), 1);
     target.innerHTML = `<div class="rd-rank-head" aria-hidden="true"><span>주제</span><span>칭찬 · 불만으로 언급한 리뷰</span><span>언급</span><span>불만 비율</span></div>
-      <div class="rd-ranks">${topics.map(t => { const share = Math.round(t.neg / t.mentions * 100);
-        return `<button type="button" class="rd-rank" data-action="select" data-theme="${esc(t.name)}" aria-pressed="${selected === t.name}" aria-label="${esc(t.name)}: 언급 ${t.mentions}건, 칭찬 ${t.pos}건, 불만 ${t.neg}건, 불만 비율 ${share}%" title="${esc(t.name)} · 칭찬 ${num(t.pos)} · 불만 ${num(t.neg)}">
+      <div class="rd-ranks">${topics.map(t => { const share = Math.round(themeNegShare(t) * 100);
+        return `<button type="button" class="rd-rank" data-action="select" data-theme="${esc(t.name)}" aria-pressed="${selected === t.name}" aria-label="${esc(t.name)}: 언급 ${t.mentions}건, 칭찬 ${t.pos}건, 불만 ${t.neg}건, 칭찬과 불만 언급 중 불만 ${share}%${t.neg_range ? `, 건수로 흔들리는 범위 ${Math.round(t.neg_range[0])}에서 ${Math.round(t.neg_range[1])}%${t.sure === false ? ', 칭찬이 많은지 불만이 많은지 불확실' : ''}` : ''}" title="${esc(t.name)} · 칭찬 ${num(t.pos)} · 불만 ${num(t.neg)}${t.neg_range ? ` · 건수로 흔들리는 범위 ${Math.round(t.neg_range[0])}–${Math.round(t.neg_range[1])}%` : ''}">
           <span class="rd-rank-name">${esc(t.name)}</span>
           <span class="rd-rank-track"><span style="width:${(t.pos + t.neg) / max * 100}%">${t.pos ? `<i class="pos" style="flex:${t.pos}"></i>` : ''}${t.neg ? `<i class="neg" style="flex:${t.neg}"></i>` : ''}</span></span>
           <span class="rd-rank-count">${num(t.mentions)}건</span>
-          <span class="rd-rank-share ${t.neg > t.pos ? 'is-neg' : ''}">${share}%</span>
+          <span class="rd-rank-share ${t.neg > t.pos && t.sure !== false ? 'is-neg' : ''}">${t.sure === false ? '<small>불확실</small>' : ''}${share}%</span>
         </button>`; }).join('')}</div>`;
   }
 
@@ -647,7 +658,7 @@ window.ReviewDashboard = (() => {
       const q = quote(t, kind === 'keep' ? 'P' : 'N');
       return `<div class="rpt-topic is-${kind}">
         <span class="rpt-tag">${kind === 'keep' ? '칭찬 최다' : '불만 최다'}</span><h3>${esc(t.name)}</h3>
-        <p class="rpt-num">${kind === 'keep' ? `칭찬 ${Math.round(t.pos / t.mentions * 100)}%` : `불만 ${Math.round(t.neg / t.mentions * 100)}%`} <small>· 언급 ${num(t.mentions)}건 (칭찬 ${num(t.pos)} / 불만 ${num(t.neg)})</small></p>
+        <p class="rpt-num">${kind === 'keep' ? `칭찬 ${Math.round((1 - themeNegShare(t)) * 100)}%` : `불만 ${Math.round(themeNegShare(t) * 100)}%`} <small>· 언급 ${num(t.mentions)}건 (칭찬 ${num(t.pos)} / 불만 ${num(t.neg)})</small></p>
         ${kind === 'fix' && action?.prob ? `<p><b>문제</b>${esc(action.prob)}</p>` : ''}
         ${kind === 'fix' && action?.why ? `<p><b>원인</b>${esc(action.why)}</p>` : ''}
         ${kind === 'fix' && action?.fix?.length ? `<p><b>유저 제안</b>${action.fix.map(esc).join(' · ')}</p>` : ''}
@@ -694,7 +705,7 @@ body { margin:0; background:#F2F4F6; font-family:system-ui,-apple-system,"Segoe 
   <h1>${esc(game)} 리뷰 진단</h1>
   <div class="rpt-meta">${esc(period)} · AI 분석 ${num(counts.analyzed)}건 / 수집 ${num(counts.collected)}건</div>
   ${data.summary ? `<p class="rpt-summary">${esc(data.summary)}</p>` : ''}
-  <h2>주제 지도</h2>${mapSVG(700, 280)}
+  <h2>IPA 매트릭스</h2>${mapSVG(700, 280)}
   <div class="rpt-two">${topicBox(s, 'keep')}${topicBox(c, 'fix')}</div>
   ${deep.length ? `<h2>심층 분석에서 찾은 것</h2><ul class="rpt-lines">${deep.map(([k, t]) => `<li><span>${k}</span><p style="margin:0">${t}</p></li>`).join('')}</ul>` : ''}
   ${design.length ? `<h2>분석 방법 <small>누가 정했나</small></h2><ul class="rpt-lines rpt-design">${design.map(r => `<li><span>${esc(r.step)} · ${esc(r.who)}</span><p style="margin:0">${esc(r.text)}${r.details?.length ? ` — ${r.details.slice(0, 3).map(esc).join(' / ')}` : ''}</p></li>`).join('')}</ul>` : ''}

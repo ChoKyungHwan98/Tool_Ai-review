@@ -205,11 +205,8 @@ def review_population_stats(app_id: int, language: str = "koreana"):
         total_all = qs_all.get("total_reviews", 0)
         score = qs_all.get("review_score_desc", "")
 
-        # 실제 한국어 추천율(p) 적용 Cochran 표본 크기 산식
-        p_val = pos_kr / total_kr if total_kr > 0 else 0.5
-        # 지나치게 편향된 추천율(예: 99% 긍정)로 인한 극소 규모 왜곡 방지용 임계값 적용
-        if p_val > 0.95: p_val = 0.95
-        if p_val < 0.05: p_val = 0.05
+        # 수집기와 같은 보수적 p=0.5: 특정 게임의 추천율 외 다른 비율에도 적용할 계획 건수.
+        p_val = 0.5
 
         neg_rate_raw = neg_kr / total_kr if total_kr > 0 else 0.5
 
@@ -343,6 +340,9 @@ def dashboard_data_v5(app_id: int = None):
         raise HTTPException(status_code=404, detail="insights_v5.json 없음 — 분석을 먼저 실행하세요")
     with open(path, "r", encoding="utf-8") as f:
         data = json.load(f)
+    # 이전 버전의 플레이 구간별 오차는 비무작위/가중 표본에 적용할 수 없으므로 노출하지 않는다.
+    for cohort in data.get("playtime", []):
+        cohort.pop("margin", None)
     data["game"] = {
         "app_id": app_id,
         "name": (game_info.get("name_kr") or game_info.get("name")) if game_info else f"App {app_id}",
@@ -486,7 +486,7 @@ class PipelineRunRequest(BaseModel):
     custom_sample_size: Optional[int] = None
     incremental: bool = False
     since: Optional[str] = None                # YYYY-MM-DD. 이 날짜 이후 리뷰만
-    sort: str = "recent"                       # recent 최신순 · helpful 공감순
+    sort: str = "recent"                       # recent 최신순 · helpful 공감순 · random 무작위
 
 @app.post("/pipeline/run", summary="파이프라인 실행", include_in_schema=False)
 def trigger_pipeline(request: PipelineRunRequest, background_tasks: BackgroundTasks):
@@ -494,7 +494,7 @@ def trigger_pipeline(request: PipelineRunRequest, background_tasks: BackgroundTa
         raise HTTPException(status_code=422, detail="게임 번호 또는 리뷰 언어를 확인하세요")
     if not 0 < request.budget <= 100:
         raise HTTPException(status_code=422, detail="분석 예산은 0달러보다 크고 100달러 이하여야 합니다")
-    if request.sort not in ("recent", "helpful"):
+    if request.sort not in ("recent", "helpful", "random"):
         raise HTTPException(status_code=422, detail="정렬은 최신순 또는 공감순만 고를 수 있습니다")
     if request.since:
         try:

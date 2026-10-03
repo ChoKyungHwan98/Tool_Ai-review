@@ -91,6 +91,22 @@ class RunControlsTests(unittest.TestCase):
         self.assertEqual(stats["selected"]["neg_rate"], 50)
         self.assertIsNone(stats["korean"])
 
+    def test_sample_preview_uses_the_collectors_conservative_formula(self):
+        answers = iter([
+            {"query_summary": {"total_reviews": 10000, "total_positive": 7000, "total_negative": 3000}},
+            {"query_summary": {"total_reviews": 10000, "total_positive": 7000, "total_negative": 3000}},
+        ])
+        def fake_get(_url, params, timeout):
+            response = Mock()
+            response.json.return_value = next(answers)
+            response.raise_for_status.return_value = None
+            return response
+        with patch("httpx.get", side_effect=fake_get):
+            stats = main.review_population_stats(1, "english")
+        self.assertEqual(stats["sample_design"]["p_applied"], 0.5)
+        self.assertEqual(stats["sample_design"]["cochran_5pct"], 370)
+        self.assertEqual(stats["sample_design"]["sample_5pct"], 370)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -147,11 +147,11 @@ def step_collect(result: PipelineResult):
     if incremental_mode and existing_count and existing_language != cfg.LANG:
         raise ValueError("다른 언어의 기존 리뷰에는 이어서 수집할 수 없습니다. 새 분석으로 시작하세요")
 
-    # 3) 기존 수집량이 목표량의 90% 이상인 경우 수집 단계를 건너뜀 (장애 재개 용도)
+    # 3) 기존 수집량이 목표량을 채운 경우에만 수집 단계를 건너뜀 (장애 재개 용도)
     same_scope = existing_scope == (cfg.COLLECT_SINCE, cfg.COLLECT_SORT or "recent")
     if incremental_mode and existing_count and not same_scope:
         raise ValueError("기간이나 정렬이 다른 기존 리뷰에는 이어서 수집할 수 없습니다. 새 분석으로 시작하세요")
-    if existing_count >= target_size * 0.9 and existing_language == cfg.LANG and same_scope and not incremental_mode:
+    if existing_count >= target_size and existing_language == cfg.LANG and same_scope and not incremental_mode:
         print(f"  ✅ 유효한 기존 리뷰 파일 존재 ({existing_count}건, 목표 {target_size}건 충족) — 수집 스킵")
         result.record("collect", "skipped", {"existing_reviews": existing_count, "target_reviews": target_size})
         return
@@ -255,9 +255,9 @@ def step_quality(result: PipelineResult):
 
 
 def step_verify(result: PipelineResult):
-    """Step 4: 신뢰도 검증"""
+    """Step 4: 추천 여부와 AI 감성 분류의 일치 점검"""
     print("\n" + "=" * 60)
-    print("🎯 [Step 4] AI 신뢰도 검증")
+    print("🎯 [Step 4] 추천 여부와 AI 분류 일치 점검")
     print("=" * 60)
 
     verify_set = cfg.project_file("verify_set.csv")
@@ -271,9 +271,9 @@ def step_verify(result: PipelineResult):
         if os.path.exists(cfg.VERIFY_JSON):
             with open(cfg.VERIFY_JSON, "r", encoding="utf-8") as f:
                 vr = json.load(f)
-            acc = vr.get("accuracy_lenient_pct", 0)
-            print(f"  관대 기준 정확도: {acc}%")
-            result.record("verify", "done", {"accuracy_lenient_pct": acc})
+            agreement = vr.get("agreement_or_mixed_pct", vr.get("accuracy_lenient_pct", 0))
+            print(f"  추천 여부 일치 또는 혼합/중립: {agreement}%")
+            result.record("verify", "done", {"agreement_or_mixed_pct": agreement})
         else:
             result.record("verify", "done")
     except Exception as e:
@@ -339,7 +339,7 @@ def _run_pipeline_unlocked(app_id: int = None, lang: str = None, budget: float =
     else:
         cfg.CUSTOM_SAMPLE_SIZE = None  # Reset if not explicitly requested
     cfg.COLLECT_SINCE = since or None
-    cfg.COLLECT_SORT = "helpful" if sort == "helpful" else "recent"
+    cfg.COLLECT_SORT = sort if sort in ("helpful", "random") else "recent"
 
     result = PipelineResult()
     result.incremental = incremental

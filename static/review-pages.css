@@ -29,6 +29,8 @@
 .rp-col-main { grid-column:span 8; }
 .rp-grid .rp-col > * { grid-column:1 / -1; }
 .rp-duo { display:grid; grid-template-columns:minmax(0,3fr) minmax(0,2fr); gap:16px; }
+.rp-duo.is-even { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.rp-grid > .rp-full { grid-column:1 / -1; }
 .rp-grid .rp-duo > * { grid-column:auto; }
 .rp-design { grid-column:span 8; }
 .rp-side { grid-column:span 4; display:grid; gap:20px; position:sticky; top:88px; align-self:start; }
@@ -39,7 +41,7 @@
 .rp-card-head h2 { margin:0; font-size:16px; font-weight:600; line-height:1.4; color:var(--rp-ink); }
 .rp-card-head p { margin:2px 0 0; font-size:13px; line-height:1.5; color:var(--rp-sub); }
 .rp-card-head p b { color:var(--rp-ink); font-weight:600; }
-.rp-card-head > .rd-icon { width:20px; height:20px; color:var(--rp-sub); }
+.rp-card-head > .rd-icon { display:none; }
 .rp-empty { margin:0; text-align:center; color:var(--rp-sub); font-size:14px; padding:36px 12px; }
 .rp-note { margin:12px 0 0; font-size:13px; line-height:1.5; color:var(--rp-sub); }
 .rp-muted { color:var(--rp-sub); }
@@ -164,13 +166,21 @@
 .rp-ptrack.agree i { background:var(--ui-accent); }
 .rp-quote { margin:16px 0 0; }
 .rp-quote figcaption { font-size:13px; color:var(--rp-sub); margin-bottom:8px; }
-.rp-quote blockquote { margin:0; padding:14px 16px; border-radius:12px; background:var(--rp-soft); font-size:14px; line-height:1.7; display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
+.rp-quote blockquote { margin:0; border:solid var(--rp-soft); border-width:14px 16px; border-radius:12px; background:var(--rp-soft); font-size:14px; line-height:1.7; display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
 .rp-wants { margin:0; padding:0; list-style:none; counter-reset:want; display:grid; border-top:1px solid var(--rp-grid); }
 .rp-wants li { counter-increment:want; display:grid; grid-template-columns:24px minmax(0,1fr); gap:2px 8px; padding:12px 0; border-bottom:1px solid var(--rp-grid); }
 .rp-wants li::before { content:counter(want); grid-row:span 2; font-weight:600; color:var(--rp-sub); }
 .rp-want-text { font-size:14px; font-weight:500; color:var(--rp-ink); }
 .rp-want-meta { font-size:13px; color:var(--rp-sub); }
 .rp-want-meta em { font-style:normal; margin-right:8px; padding:1px 8px; border-radius:6px; background:var(--rp-soft); color:var(--rp-text); }
+
+/* 약속 점검: 예 / 아니오 목록 */
+.rp-checks { margin:16px 0 0; padding:0; list-style:none; display:grid; }
+.rp-checks li { display:grid; grid-template-columns:56px minmax(0,1fr); gap:12px; align-items:start; padding:10px 0; border-top:1px solid var(--rp-grid); font-size:14px; color:var(--rp-ink); }
+.rp-checks b { justify-self:start; padding:1px 10px; border-radius:999px; font-size:13px; font-weight:600; }
+.rp-checks .is-ok b { background:var(--rp-pos-bg); color:var(--rp-pos-ink); }
+.rp-checks .is-no b { background:var(--rp-neg-bg); color:var(--rp-neg-ink); }
+.rp-checks small { display:block; font-size:13px; color:var(--rp-sub); }
 
 /* ---------- 반응형 ---------- */
 @media (max-width:1180px) {
@@ -181,7 +191,7 @@
   .rp { --rp-pad:16px; }
   .rp-grid { gap:8px; }
   .rp-col { gap:8px; }
-  .rp-duo { grid-template-columns:minmax(0,1fr); gap:8px; }
+  .rp-duo, .rp-duo.is-even { grid-template-columns:minmax(0,1fr); gap:8px; }
   .rp-tags { margin-left:0; width:100%; }
   .rp-steps > li { grid-template-columns:1fr auto; }
   .rp-step-text { grid-column:1 / -1; }

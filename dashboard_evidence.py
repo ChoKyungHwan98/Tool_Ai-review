@@ -6,6 +6,7 @@ recommendation are different dimensions; one review may contain both sentiments.
 import csv
 import json
 import re
+import statistics
 from collections import Counter
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -134,6 +135,80 @@ def min_stamp(reviews, positive):
                if t is not None and t > 0)
 
 
+def interval90(hits, n):
+    """비율 hits/n의 90% Wilson 범위 [낮은 %, 높은 %].
+
+    건수가 적어서 생기는 흔들림만 잰다. 무작위로 뽑았고 AI 분류가 맞다는 가정 아래의 범위이므로
+    전체 유저에 대한 신뢰구간으로 쓰지 않고, 칭찬·불만 어느 쪽이 많은지 말할 수 있는지만 가린다."""
+    if not n:
+        return None
+    z, p = 1.645, hits / n
+    centre = (p + z * z / (2 * n)) / (1 + z * z / n)
+    half = z * ((p * (1 - p) / n + z * z / (4 * n * n)) ** .5) / (1 + z * z / n)
+    return [round(max(0.0, centre - half) * 100, 1), round(min(1.0, centre + half) * 100, 1)]
+
+
+def margin95_exact(n, population):
+    """무작위 표본의 최대 비율 오차(%p). 판정에는 반올림 전 값을 쓴다."""
+    if not n or not population:
+        return None
+    if n >= population:
+        return 0.0
+    return 1.96 * ((0.25 / n) * (population - n) / (population - 1)) ** .5 * 100
+
+
+def margin95(n, population):
+    value = margin95_exact(n, population)
+    return round(value, 1) if value is not None else None
+
+
+def promise_check(design, collected, analyzed, analyzable, missing_eligible=None):
+    """표본 오차를 표시할 수 있는지 수집 범위와 분석 누락을 확인한다."""
+    params, population = design.get("params") or {}, (design.get("population") or {}).get("total")
+    planned, target = (design.get("design") or {}).get("n_total"), params.get("target_error_pct")
+    if not planned or target is None:
+        return None
+    pool = params.get("random_pool") or {}
+    random_complete = params.get("sort") == "random" and pool.get("complete") is True
+    # 기간을 지정했거나 Steam의 전체 건수가 변했을 수 있으므로 실제로 끝까지 훑은 범위를 분모로 쓴다.
+    frame_size = pool.get("size") if random_complete else population
+    enough = bool(frame_size) and collected >= min(planned, frame_size)
+    actual_margin = margin95_exact(collected, frame_size) if random_complete else None
+    checks = [
+        {"name": "수집 범위를 끝까지 훑고 무작위로 뽑았는가", "ok": random_complete,
+         "text": ("범위 안의 리뷰를 모두 훑고 그중에서 뽑았습니다" if params.get("sort") == "random" and pool.get("complete")
+                  else "리뷰가 많아 최근 글 안에서만 뽑았습니다" if params.get("sort") == "random"
+                  else "공감이 많은 글부터 가져왔습니다" if params.get("sort") == "helpful"
+                  else "가장 최근 글부터 차례로 가져왔습니다. 계획한 건수가 차면 그보다 오래된 리뷰는 들어오지 않습니다")},
+        {"name": "계획한 만큼 모았는가", "ok": enough,
+         "text": f"계획 {planned:,}건 중 {collected:,}건"},
+        {"name": "고른 오차 이내인가", "ok": actual_margin is not None and actual_margin <= target,
+         "text": f"실제 수집 건수 기준 최대 ±{round(actual_margin, 1)}%p" if actual_margin is not None else "무작위 수집 범위가 확인되지 않음"},
+        {"name": "분석 가능한 글을 빠짐없이 분석했는가",
+         "ok": bool(analyzable) and analyzed >= analyzable and (missing_eligible is None or missing_eligible == 0),
+         "text": f"분석할 수 있는 글 {analyzable:,}건 중 {analyzed:,}건 ({round(analyzed / analyzable * 100) if analyzable else 0}%)"},
+    ]
+    kept = all(c["ok"] for c in checks)
+    return {"target": target, "planned": planned, "population": population, "checks": checks,
+            "kept": kept, "frame_size": frame_size if random_complete else None,
+            # 추천 여부는 모든 수집 리뷰에 있으므로 실제 수집 건수를 쓴다. AI 주제 비율의 오차가 아니다.
+            "analyzed_margin": margin95(collected, frame_size) if kept else None,
+            "analyzed": analyzed}
+
+
+def stage_profile(key, name, ids, reviews):
+    """한 단계에 남은 리뷰 묶음의 성격: 건수 · 비추천 비율 · 플레이 시간과 글 길이의 가운데 값."""
+    rows = [reviews[rid] for rid in ids]
+    if not rows:
+        return None
+    middle = lambda values: statistics.median(values) if values else None
+    hours = sorted(h for h in (review_hours(r) for r in rows) if h is not None)
+    lengths = sorted(len((r.get("content") or "").strip()) for r in rows)
+    return {"key": key, "name": name, "n": len(rows),
+            "negative_rate": round(sum(not is_positive(r) for r in rows) / len(rows) * 100, 1),
+            "hours": round(middle(hours), 1) if hours else None, "length": middle(lengths)}
+
+
 def build_evidence(directory, app_id):
     source = load_sources(directory)
     if source is None:
@@ -141,8 +216,9 @@ def build_evidence(directory, app_id):
     reviews, analyzed, design, skipped, complaints = source
     members, alias, merges, n_ai_topics = merged_topics(analyzed)
     n = len(reviews)
+    min_len = (design.get("params") or {}).get("min_len") or 2
+    eligible_ids = {rid for rid, r in reviews.items() if len((r.get("content") or "").strip()) >= min_len}
     up = sum(is_positive(r) for r in reviews.values())
-    base = up / n if n else None
     cohorts = []
     for index, (_, _, label) in enumerate(BUCKETS):
         ids = {rid for rid, row in reviews.items() if bucket_index(row) == index}
@@ -154,17 +230,19 @@ def build_evidence(directory, app_id):
     themes = []
     for name, group in members.items():
         ids = group["P"] | group["N"]
-        remaining_n = n - len(ids)
-        without = ((up - sum(is_positive(reviews[rid]) for rid in ids)) / remaining_n
-                   if remaining_n else None)
+        # 화면의 불만 비율과 같은 분모(칭찬 언급 + 불만 언급)로 범위를 구한다.
+        neg_range = interval90(len(group["N"]), len(group["P"]) + len(group["N"]))
         cells = []
         for index, cohort in enumerate(cohorts):
             count = sum(bucket_index(reviews[rid]) == index for rid in group["N"])
             cells.append({"count": count, "denominator": cohort["analyzed"],
                           "rate": round(count / cohort["analyzed"] * 100, 1) if cohort["analyzed"] else None})
         themes.append({"name": name, "pos": len(group["P"]), "neg": len(group["N"]),
-                       "mentions": len(ids), "negative_recommended": sum(is_positive(reviews[rid]) for rid in group["N"]),
-                       "exclusion_delta": round((without - base) * 100, 2) if without is not None else None,
+                       "mentions": len(ids),
+                       # 범위가 50%를 걸치면 이 건수로는 칭찬이 많은지 불만이 많은지 말할 수 없다.
+                       "neg_range": neg_range,
+                       "sure": bool(neg_range) and (neg_range[0] > 50 or neg_range[1] < 50),
+                       "negative_recommended": sum(is_positive(reviews[rid]) for rid in group["N"]),
                        "cells": cells,
                        "examples": {s: [excerpt(reviews[rid], app_id) for rid in sorted_ids(group[s], reviews)[:2]]
                                     for s in ("P", "N")}})
@@ -196,6 +274,10 @@ def build_evidence(directory, app_id):
     analyzed_negative = sum(not is_positive(reviews[rid]) for rid in analyzed)
     # 주제 화면의 숫자가 실제로 나오는 묶음: 주제가 하나라도 붙은 리뷰
     themed = {rid for group in members.values() for key in ("P", "N") for rid in group[key]}
+    # Steam 추천 여부 × 글에 담긴 반응. 추천하면서 불만을 쓴 글, 비추천하면서 칭찬한 글이 보인다.
+    vote_mood = {"up": dict.fromkeys("PMNU", 0), "down": dict.fromkeys("PMNU", 0)}
+    for rid, item in analyzed.items():
+        vote_mood["up" if is_positive(reviews[rid]) else "down"][item.get("s") if item.get("s") in "PMN" else "U"] += 1
     # 추천과 비추천은 따로 최신순으로 모은다. 두 묶음의 기간이 어긋났는지 화면이 알려 준다.
     vote_periods = {}
     for key, positive in (("up", True), ("down", False)):
@@ -207,14 +289,22 @@ def build_evidence(directory, app_id):
                  if len(vote_periods) == 2 else None)
     return {"counts": {"collected": n, "analyzed": len(analyzed), "negative": n - up,
                        "analyzed_negative": analyzed_negative,
-                       "themed": len(themed),
+                       "themed": len(themed), "vote_mood": vote_mood,
                        "excluded_negative": (n - up) - analyzed_negative,
                        "complaint_reviews": len(complaint_ids),
                        "recommended_complaints": sum(is_positive(reviews[rid]) for rid in complaint_ids),
                        "unknown_playtime": sum(review_hours(r) is None for r in reviews.values()),
+            "short_excluded": n - len(eligible_ids),
+            "analysis_missing_eligible": len(eligible_ids - analyzed.keys()),
                        "skipped_analysis": skipped},
             "period": {"start": day(min(timestamps)), "end": day(max(timestamps))} if timestamps else None,
             "vote_periods": vote_periods, "vote_period_gap_days": start_gap,
+            "promise": promise_check(design, n, len(analyzed), len(eligible_ids), len(eligible_ids - analyzed.keys())),
+            # 걸러질 때마다 남은 글의 성격이 달라지는지 (치우침 점검)
+            "bias": [stage_profile("collected", "수집한 리뷰", list(reviews), reviews),
+                     stage_profile("analyzed", "AI가 분석한 글", list(analyzed), reviews),
+                     stage_profile("themed", "주제가 붙은 글", sorted(themed), reviews),
+                     stage_profile("excluded", "분석에서 뺀 글", [rid for rid in reviews if rid not in analyzed], reviews)],
             "daily": [{"date": d, "up": by_day[d][0], "down": by_day[d][1]} for d in sorted(by_day)],
             "language": (design.get("params") or {}).get("language", "unknown"),
             "languages": Counter(r.get("language") or "unknown" for r in reviews.values()).most_common(8),
@@ -281,13 +371,14 @@ def build_deep(reviews, analyzed, members, complaints, app_id, alias=None):
     causes = []
     for name in focus:
         rows = parts.get(name) or []
-        seen, example = Counter(), {}
+        seen, example = {}, {}
         for rid, prob, why, _ in rows:
             for w in sorted(words(f"{prob} {why}") - words(name)):
-                seen[w] += 1
+                seen.setdefault(w, set()).add(rid)
                 example.setdefault(w, prob or why)
-        ranked = sorted(seen.items(), key=lambda kv: (-kv[1], kv[0]))[:6]
-        terms = [{"word": w, "count": c, "example": example[w][:60]} for w, c in ranked if c >= 2]
+        ranked = sorted(seen.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:6]
+        terms = [{"word": w, "count": len(ids), "example": example[w][:60]}
+                 for w, ids in ranked if len(ids) >= 2]
         causes.append({"theme": name, "reviews": len({r[0] for r in rows}), "terms": terms})
 
     # ② 초반 이탈: 20시간 전에 비추천한 리뷰와 그 뒤에 비추천한 리뷰가 불만으로 꼽은 주제
@@ -313,7 +404,9 @@ def build_deep(reviews, analyzed, members, complaints, app_id, alias=None):
     # ③ 공감 많은 불만: 다른 유저가 "도움됨"을 누른 수
     total_votes = sum(votes(reviews[rid]) for g in members.values() for rid in g["N"]) or 0
     total_neg = sum(len(g["N"]) for g in members.values()) or 0
-    agreed = sorted(({"name": name, "neg": len(g["N"]), "votes": sum(votes(reviews[rid]) for rid in g["N"])}
+    # voted = 도움됨을 한 표라도 받은 불만 리뷰 수. 리뷰 하나가 표를 몰아 받았는지 화면이 가려낸다.
+    agreed = sorted(({"name": name, "neg": len(g["N"]), "votes": sum(votes(reviews[rid]) for rid in g["N"]),
+                      "voted": sum(votes(reviews[rid]) > 0 for rid in g["N"])}
                      for name, g in members.items() if g["N"]), key=lambda t: -t["votes"])[:6]
     for t in agreed:
         t["vote_share"] = share(t["votes"], total_votes)
@@ -324,12 +417,16 @@ def build_deep(reviews, analyzed, members, complaints, app_id, alias=None):
 
     # ④ 유저가 원하는 것: 불만 리뷰의 구체적인 요청. 같은 문장은 합치고 공감 순
     wants = {}
+    counted_requests = set()
     for name, rows in parts.items():
         for rid, _, _, fix in rows:
             text = " ".join(fix.split())
             if len(text) < 6 or text in VAGUE or not any(m in text for m in REQUEST_MARKS):
                 continue
             key = re.sub(r"\s+", "", text)
+            if (key, rid) in counted_requests:
+                continue
+            counted_requests.add((key, rid))
             w = wants.setdefault(key, {"text": text[:60], "theme": name, "count": 0, "votes": 0})
             w["count"] += 1
             w["votes"] += votes(reviews[rid])

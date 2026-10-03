@@ -744,11 +744,11 @@ body.no-analysis #ovBody { display: none; }
   .run-seg button { font-size:13px; padding:10px 4px; }
 }
 </style>
-<link rel="stylesheet" href="/static/review-dashboard.css?v=20261003-flow1">
+<link rel="stylesheet" href="/static/review-dashboard.css?v=20261003-statsfix4">
 <script src="/static/vendor/apexcharts.min.js?v=3.54.1"></script>
-<script src="/static/review-dashboard.js?v=20261003-flow1"></script>
-<link rel="stylesheet" href="/static/review-pages.css?v=20261003-flow1">
-<script src="/static/review-pages.js?v=20261003-flow1"></script>
+<script src="/static/review-dashboard.js?v=20261003-statsfix4"></script>
+<link rel="stylesheet" href="/static/review-pages.css?v=20261003-statsfix4">
+<script src="/static/review-pages.js?v=20261003-statsfix4"></script>
 <style>
 /* 공용 글꼴. 설치된 Pretendard가 있으면 그걸 쓰고, 없으면 스튜디오에 넣어 둔 파일을 쓴다(SIL OFL 1.1). */
 @font-face {
@@ -943,11 +943,11 @@ body.no-analysis #ovBody { display: none; }
           </div>
           <div>
             <label class="run-label" for="modalSort">정렬</label>
-            <select id="modalSort" class="select">
-              <option value="recent">최신순</option><option value="helpful">공감순</option>
+            <select id="modalSort" class="select" onchange="updatePrecision()">
+              <option value="recent">최신순</option><option value="helpful">공감순</option><option value="random">무작위</option>
             </select>
           </div>
-          <p class="run-help">업데이트 뒤 반응만 보려면 기간을, 많은 유저가 동의한 의견을 보려면 공감순을 고르세요. 공감순은 최근 1년까지만 기간을 걸 수 있습니다.</p>
+          <p class="run-help">업데이트 뒤 반응만 보려면 기간을, 많은 유저가 동의한 의견을 보려면 공감순을 고르세요. 무작위는 한쪽으로 기울지 않지만 몇 분 걸립니다. 공감순은 최근 1년까지만 기간을 걸 수 있습니다.</p>
         </section>
 
         <section class="run-field">
@@ -977,7 +977,7 @@ body.no-analysis #ovBody { display: none; }
             <span class="run-label">수집량</span>
             <span class="precision-badge"><b id="precMargin">±5%</b></span>
           </div>
-          <p class="precision-sub">읽을 리뷰 수를 정합니다. 표시한 오차는 무작위 표본일 때의 이론값입니다.</p>
+          <p class="precision-sub">읽을 리뷰 수를 정합니다.</p>
           <div class="precision-curve-wrap">
             <svg id="precCurve" class="precision-curve" viewBox="0 0 320 72" preserveAspectRatio="none" aria-hidden="true">
               <path id="precCurveArea" class="precision-curve-area" d="" />
@@ -1420,8 +1420,9 @@ function precisionPlan(marginPct) {
   const e = marginPct / 100;
   const n0 = (z * z * p * (1 - p)) / (e * e);
   const cochran = Math.ceil(n0 / (1 + (n0 - 1) / N));
-  const negRate = (modalStats.selected.neg_rate || 0) / 100;
-  const forNeg = negRate > 0 ? Math.ceil(100 / negRate) : cochran;
+  const negRate = modalStats.selected.negative / N;
+  const minNeg = modalStats.sample_design?.min_neg_required ?? 100;
+  const forNeg = negRate > 0 ? Math.ceil(minNeg / negRate) : cochran;
   const actual = Math.min(Math.max(cochran, forNeg), N);
   return { cochran: cochran, actual: actual, total: N, minNegDriven: forNeg > cochran };
 }
@@ -1539,8 +1540,10 @@ function updatePrecision() {
   const digits = margin % 1 === 0 ? 0 : 1;
   const low = Math.max(0, 93 - margin).toFixed(digits);
   const high = Math.min(100, 93 + margin).toFixed(digits);
-  let note = '<b>±' + margin + '%</b>는 무작위 표본을 가정한 수집 목표입니다.'
-    + ' 최신 리뷰는 무작위 표본이 아니므로 실제 정확도를 보장하지 않습니다.';
+  const sortMode = document.getElementById('modalSort')?.value;
+  let note = sortMode === 'random'
+    ? '<b>±' + margin + '%</b>는 수집 범위를 끝까지 확인하고 무작위로 뽑았을 때의 계획 기준입니다. 완료 후 조건을 다시 확인합니다.'
+    : '<b>±' + margin + '%</b>는 읽을 건수를 정하는 기준일 뿐입니다. 최신순·공감순 결과의 통계적 오차가 아닙니다.';
 
   if (plan.minNegDriven) {
     note += '<br>왼쪽이 평평한 이유: 비추천 리뷰 최소 100건 조건이 먼저 수집량을 결정합니다.';
@@ -1551,7 +1554,7 @@ function updatePrecision() {
       ? '<br>한 칸 더 정확하게(±' + PRECISION_STOPS[index + 1] + '%) 가려면 <b>' + times.toFixed(1) + '배</b>인 ' + next.actual.toLocaleString() + '건을 읽어야 합니다.'
       : '<br>한 칸 더 정확하게(±' + PRECISION_STOPS[index + 1] + '%) 가도 ' + next.actual.toLocaleString() + '건으로 거의 같습니다.';
   }
-  if (index >= 7) note += '<br>오른쪽이 가팔라지는 이유: 목표 오차를 절반으로 줄이면 필요한 리뷰는 대략 4배가 됩니다.';
+  if (index >= 7) note += '<br>오른쪽이 가팔라지는 이유: 단순 무작위 표본에서는 목표 오차를 절반으로 줄일 때 필요한 리뷰가 대략 4배가 됩니다.';
   const best = precisionBestIndex();
   if (best > index) {
     note += '<br><b>돈을 더 쓰지 않고 ±' + PRECISION_STOPS[best] + '%까지 갈 수 있습니다.</b>'

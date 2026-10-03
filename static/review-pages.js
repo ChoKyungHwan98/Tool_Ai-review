@@ -152,16 +152,19 @@ window.ReviewPages = (() => {
     const colNegRate = colNeg != null ? colNeg / collected * 100 : null;
     const popNegRate = pop.total ? pop.negative / pop.total * 100 : null;
     const skipped = analyzed != null ? collected - analyzed : null;
+    const shortExcluded = counts.short_excluded ?? skipped;
+    const analysisMissing = counts.analysis_missing_eligible ?? 0;
     const ratio = popNegRate && colNegRate != null ? colNegRate / popNegRate : null;
     const balanceNote = ratio == null ? ''
       : ratio >= 1.3 ? `불만을 충분히 보려고 비추천 리뷰를 Steam 전체보다 <b>${ratio.toFixed(1)}배</b> 많은 비율로 모았습니다.`
       : ratio <= .77 ? `수집한 리뷰의 비추천 비율이 Steam 전체보다 낮습니다. 최신 리뷰 중 비추천이 적었기 때문일 수 있습니다.`
-      : 'Steam 전체와 비슷한 비율로 모였습니다.';
+      : params.sort === 'random' ? 'Steam 전체와 비슷한 비율로 모였습니다.' : '수집할 때 이 비율에 맞춰 건수를 나눴기 때문에 같습니다.';
     const bar = (label, sub, negRate) => negRate == null ? '' : `<div class="rp-bal-row">
         <span class="rp-bal-label"><b>${label}</b><small>${sub}</small></span>
         <span class="rp-bal-val">비추천 <b>${pct(negRate)}</b></span>
         <span class="rp-bal-bar" role="img" aria-label="${label}: 추천 ${pct(100 - negRate)}, 비추천 ${pct(negRate)}"><i class="up" style="width:${100 - negRate}%"></i><i class="down" style="width:${negRate}%"></i></span></div>`;
-    const sortLabel = params.sort === 'helpful' ? '공감순' : '최신순';
+    const sortLabel = params.sort === 'helpful' ? '공감순' : params.sort === 'random' ? '무작위' : '최신순';
+    const pool = params.random_pool;
     const since = params.since ? params.since.replaceAll('-', '.') : '';
     const lang = LANG_NAMES[params.language || data?.evidence?.language] || '';
     const langs = data?.evidence?.languages || [];
@@ -171,7 +174,7 @@ window.ReviewPages = (() => {
         ${kpi(`Steam ${esc(lang)} 리뷰 전체`, 'globe', pop.total ? num(pop.total) : '—', pop.total ? '건' : '', '', pop.score ? `Steam 평가 · ${esc(SCORE_NAMES[pop.score] || pop.score)}` : '수집 당시 Steam에 올라온 리뷰')}
         ${kpi(`${sortLabel}으로 수집`, 'review', num(collected), '건', pop.total ? pct(collected / pop.total * 100) : '', since ? `${since} 이후 · 전체 중 비율` : 'Steam 전체 중 비율')}
         ${kpi('AI가 분석', 'spark', num(analyzed), analyzed == null ? '' : '건', analyzed == null ? '' : share(analyzed, collected), '수집한 리뷰 중 분석한 비율')}
-        ${q?.overall_score != null ? kpi('분석 품질 점검', 'matrix', num(q.overall_score), '점', esc(q.grade_kr || ''), `통과 기준 ${q.thresholds?.pass ?? 80}점`) : ''}
+        ${q?.overall_score != null ? kpi('자료 상태 점검', 'matrix', num(q.overall_score), '점', esc(q.grade_kr || ''), `내부 기준 ${q.thresholds?.pass ?? 80}점`) : ''}
       </div>
       <div class="rp-grid">
         <div class="rp-col rp-col-main">
@@ -180,20 +183,11 @@ window.ReviewPages = (() => {
         </div>
         <div class="rp-col">
           ${analyzed != null ? `<section class="rp-card">
-            ${cardHead('수집에서 분석까지', `수집 ${num(collected)}건 → AI 분석 ${num(analyzed)}건${counts.themed != null ? ` → 주제가 붙은 리뷰 ${num(counts.themed)}건` : ''}`, 'spark')}
-            <div class="rp-split" role="img" aria-label="수집 ${collected}건 중 주제가 붙은 리뷰 ${counts.themed ?? '알 수 없음'}건, 주제 없이 반응만 센 리뷰 ${counts.themed != null ? analyzed - counts.themed : '알 수 없음'}건, 짧아서 제외 ${skipped}건">
+            ${cardHead('수집에서 분석까지', `수집 ${num(collected)}건 중`, 'spark')}
+            <div class="rp-split" role="img" aria-label="수집 ${collected}건 중 주제가 붙은 리뷰 ${counts.themed ?? '알 수 없음'}건, 주제 없이 반응만 센 리뷰 ${counts.themed != null ? analyzed - counts.themed : '알 수 없음'}건, 짧아서 제외 ${shortExcluded}건, 분석 대상 누락 ${analysisMissing}건">
               ${counts.themed != null ? `<i class="done" style="flex:${counts.themed} 1 0"></i><i class="use-1" style="flex:${analyzed - counts.themed} 1 0"></i>` : `<i class="done" style="flex:${analyzed} 1 0"></i>`}<i class="skip" style="flex:${Math.max(skipped, 0)} 1 0"></i></div>
-            <div class="rp-use-list">${counts.themed != null ? `<span><i class="done"></i>주제가 붙음 <b>${num(counts.themed)}건</b> · ${share(counts.themed, collected)}</span><span><i class="use-1"></i>주제 없이 반응만 <b>${num(analyzed - counts.themed)}건</b> · ${share(analyzed - counts.themed, collected)}</span>` : `<span><i class="done"></i>AI 분석 <b>${num(analyzed)}건</b></span>`}<span><i class="skip"></i>짧아서 제외 <b>${num(skipped)}건</b> · ${share(skipped, collected)}</span></div>
-            ${counts.themed != null ? `<p class="rp-callout">주제별 보기 · 주제 지도 · 불만 비율은 <b>주제가 붙은 ${num(counts.themed)}건</b>에서 나온 숫자입니다. 수집한 리뷰의 ${share(counts.themed, collected)}입니다. "재밌어요"처럼 대상을 말하지 않은 글은 주제 없이 반응(긍정 · 부정)만 셉니다.</p>` : ''}
-            <p class="rp-note">${params.min_len ?? 8}자보다 짧은 추천 리뷰는 AI 분석에서 뺐습니다. 짧아도 비추천이거나 렉 · 버그 · 환불 같은 말이 있으면 분석에 넣기 때문에, 빠진 글은 대부분 추천입니다.</p>
-            ${counts.analyzed_negative != null && skipped > 0 ? `<div class="rp-bal rp-bal-check">
-              ${bar('AI가 분석한 리뷰', `${num(analyzed)}건`, counts.analyzed_negative / analyzed * 100)}
-              ${bar('분석에서 뺀 리뷰', `${num(skipped)}건`, counts.excluded_negative / skipped * 100)}
-            </div>
-            <p class="rp-callout">${(() => { const a = counts.analyzed_negative / analyzed * 100, x = counts.excluded_negative / skipped * 100, gap = a - x;
-              return Math.abs(gap) < 2 ? '분석한 쪽과 뺀 쪽의 비추천 비율이 비슷합니다. 짧은 리뷰를 뺀 것이 결과를 한쪽으로 기울이지 않았습니다.'
-                : gap > 0 ? `분석한 리뷰는 뺀 리뷰보다 비추천 비율이 <b>${gap.toFixed(1)}%p</b> 높습니다. 주제·불만 수치는 수집한 리뷰 전체보다 불만 쪽으로 기운 묶음에서 나온 것입니다.`
-                : `분석한 리뷰는 뺀 리뷰보다 비추천 비율이 <b>${Math.abs(gap).toFixed(1)}%p</b> 낮습니다. 짧은 비추천 리뷰가 분석에서 빠져 불만이 실제보다 적게 잡혔을 수 있습니다.`; })()}</p>` : ''}
+            <div class="rp-use-list">${counts.themed != null ? `<span><i class="done"></i>주제가 붙음 <b>${num(counts.themed)}건</b> · ${share(counts.themed, collected)}</span><span><i class="use-1"></i>주제 없이 반응만 <b>${num(analyzed - counts.themed)}건</b> · ${share(analyzed - counts.themed, collected)}</span>` : `<span><i class="done"></i>AI 분석 <b>${num(analyzed)}건</b></span>`}<span><i class="skip"></i>짧아서 제외 <b>${num(shortExcluded)}건</b> · ${share(shortExcluded, collected)}</span>${analysisMissing ? `<span><i class="skip"></i>분석 대상 누락 <b>${num(analysisMissing)}건</b> · ${share(analysisMissing, collected)}</span>` : ''}</div>
+            <p class="rp-note">주제별 숫자는 주제가 붙은 글에서만 나옵니다.</p>
             ${langs.length > 1 ? `<p class="rp-note">수집한 리뷰의 언어: ${langs.map(([k, n]) => `${esc(LANG_NAMES[k] || k)} ${num(n)}건`).join(' · ')}</p>` : ''}
           </section>` : ''}
           <section class="rp-card">
@@ -207,20 +201,55 @@ window.ReviewPages = (() => {
           <section class="rp-card rp-caveat">
             ${cardHead('이 숫자를 읽을 때', '', 'info')}
             <ul>
-              <li><b>${sortLabel}으로 모은 리뷰입니다${since ? ` (${since} 이후)` : ''}.</b> 전체 유저를 무작위로 뽑은 표본이 아니므로 "전체 유저의 몇 %"로 읽으면 안 됩니다.</li>
-              ${pop.total && data?.evidence?.period ? `<li>추천 · 비추천 건수는 <b>출시 이후 전체 ${num(pop.total)}건의 비율</b>로 나눴지만, 실제로 모은 글은 <b>${data.evidence.period.start.replaceAll('-', '.')} – ${data.evidence.period.end.replaceAll('-', '.')}</b>에 쓴 리뷰입니다. 이 결과는 그 기간의 리뷰에 대한 이야기입니다.</li>` : ''}
+              ${params.sort === 'random' && pool
+                ? `<li><b>${since ? `${since} 이후 ` : ''}리뷰 ${num(pool.size)}건을 훑고 그중에서 무작위로 뽑았습니다.</b> ${pool.complete ? '확인한 리뷰 범위 안에서 무작위로 뽑았습니다.' : `수집 범위를 끝까지 확인하지 못해 최근 ${num(pool.size)}건 안에서만 뽑았습니다.`} 리뷰를 쓰지 않은 유저의 생각은 알 수 없습니다.</li>`
+                : `<li><b>${sortLabel}으로 모은 리뷰입니다${since ? ` (${since} 이후)` : ''}.</b> 전체 유저를 무작위로 뽑은 표본이 아니므로 "전체 유저의 몇 %"로 읽으면 안 됩니다.</li>`}
               ${(() => { const vp = data?.evidence?.vote_periods, gap = data?.evidence?.vote_period_gap_days;
                 if (!vp?.up || !vp?.down || gap == null) return '';
                 const span = Math.max(vp.up.days, vp.down.days, 1);
                 return gap > Math.max(7, span * .2)
                   ? `<li><b>추천과 비추천을 모은 기간이 ${num(gap)}일 어긋납니다.</b> 추천은 ${vp.up.start.replaceAll('-', '.')}부터, 비추천은 ${vp.down.start.replaceAll('-', '.')}부터입니다. 둘을 같은 시기의 의견으로 견주면 안 됩니다.</li>`
-                  : `<li>추천(${vp.up.start.replaceAll('-', '.')}부터)과 비추천(${vp.down.start.replaceAll('-', '.')}부터)을 모은 기간은 거의 같습니다.</li>`; })()}
-              ${design.n_total ? `<li><b>처음 계획은 ${num(design.n_total)}건</b>(추천 ${num(design.n_pos)} / 비추천 ${num(design.n_neg)})이었고, 그대로 모았습니다.</li>` : ''}
+                  : ''; })()}
+              ${design.n_total ? `<li><b>처음 계획은 ${num(design.n_total)}건</b>(추천 ${num(design.n_pos)} / 비추천 ${num(design.n_neg)})이었고, 실제 ${num(collected)}건 모았습니다.</li>` : ''}
               ${params.min_neg ? `<li>불만을 볼 수 있도록 비추천을 최소 <b>${num(params.min_neg)}건</b> 모으도록 설정했습니다.</li>` : ''}
             </ul>
           </section>
         </div>
+        <div class="rp-duo is-even rp-full">${promiseHTML(data?.evidence?.promise)}${biasHTML(data?.evidence?.bias)}</div>
       </div>`;
+  }
+
+  // 표본 오차는 수집 범위·건수·목표 오차·분석 완료 조건을 모두 확인한 뒤 표시한다.
+  function promiseHTML(p) {
+    if (!p) return '';
+    return `<section class="rp-card">
+        ${cardHead('표본 오차의 조건', `계획 기준 ±${num(p.target)}% · 계획 ${num(p.planned)}건`, 'matrix')}
+        <p class="rp-insight">${p.kept
+          ? `<b>조건을 충족했습니다.</b> 확인한 리뷰 범위의 추천 비율을 표본에서 추정할 때 최대 오차는 95% 신뢰수준에서 ±${num(p.analyzed_margin)}%p입니다.`
+          : `<b>통계적 오차로 해석할 수 없습니다.</b> ±${num(p.target)}%는 수집 건수를 정한 계획 기준입니다.`}</p>
+        <ol class="rp-checks">${p.checks.map(c => `<li class="${c.ok ? 'is-ok' : 'is-no'}"><b>${c.ok ? '예' : '아니오'}</b><span>${esc(c.name)}<small>${esc(c.text)}</small></span></li>`).join('')}</ol>
+        ${p.kept ? '' : '<p class="rp-callout">무작위 정렬을 선택해도 수집 범위를 끝까지 확인하고 분석 가능한 글을 모두 분석해야 합니다.</p>'}
+        <p class="rp-note">이 오차는 수집 대상 리뷰의 추천 비율에만 해당합니다. 주제별 비율, AI 분류의 정확도, 리뷰를 쓰지 않은 유저는 포함하지 않습니다.</p>
+      </section>`;
+  }
+
+  // 치우침 점검: 수집 → 분석 → 주제로 걸러질 때마다 남은 글의 성격이 달라지는지 잰다. 사람도 AI도 쓰지 않는다.
+  function biasHTML(rows) {
+    rows = (rows || []).filter(r => r && r.n);
+    const base = rows[0];
+    if (!base || rows.length < 2) return '';
+    const off = (r, key, limit) => r !== base && r[key] != null && base[key] != null && Math.abs(r[key] - base[key]) >= limit(base[key]);
+    const cell = (r, key, text, limit) => `<td class="${off(r, key, limit) ? 'is-cross' : ''}">${r[key] == null ? '—' : text(r[key])}</td>`;
+    const themed = rows.find(r => r.key === 'themed') || rows[1];
+    const gap = themed.negative_rate - base.negative_rate, hours = themed.hours != null && base.hours != null ? themed.hours - base.hours : null;
+    return `<section class="rp-card">
+        ${cardHead('단계마다 치우침이 생기는가', '걸러질 때마다 남은 글의 성격이 달라지는지 봅니다', 'scale')}
+        <table class="rd-cross"><thead><tr><td></td><th scope="col">비추천</th><th scope="col">플레이 시간</th><th scope="col">글 길이</th></tr></thead>
+          <tbody>${rows.map(r => `<tr><th scope="row">${esc(r.name)}<small>${num(r.n)}건</small></th>
+            ${cell(r, 'negative_rate', pct, () => 2)}${cell(r, 'hours', v => `${num(Math.round(v))}시간`, v => Math.max(5, v * .25))}${cell(r, 'length', v => `${num(v)}자`, v => Math.max(5, v * .5))}</tr>`).join('')}</tbody></table>
+        <p class="rp-callout">주제 숫자가 나오는 <b>${esc(themed.name)} ${num(themed.n)}건</b>은 수집한 리뷰 전체보다 비추천이 <b>${Math.abs(gap).toFixed(1)}%p</b> ${hours == null ? (gap >= 0 ? '많습니다' : '적습니다') : `${gap >= 0 ? '많고' : '적고'}, 플레이 시간이 <b>${num(Math.abs(Math.round(hours)))}시간</b> ${hours >= 0 ? '깁니다' : '짧습니다'}`}.</p>
+        <p class="rp-note">플레이 시간과 글 길이는 가운데 값입니다. 색이 칠해진 칸은 수집한 리뷰 전체와 차이가 큰 값입니다.</p>
+      </section>`;
   }
 
   // 분석 설계서: 단계마다 누가 정했는지(사람 · AI · 규칙)와 무엇을 정했는지
@@ -265,15 +294,16 @@ window.ReviewPages = (() => {
     const tone = v => v >= pass ? 'ok' : v >= warn ? 'warn' : 'bad';
     const issues = dims.flatMap(([k]) => q.dimensions[k]?.issues || []).slice(0, 4);
     return `<section class="rp-card rp-half">
-        ${cardHead('분석 품질 점검', `세로선은 통과 기준 ${pass}점`, 'matrix')}
+        ${cardHead('자료 상태 점검', `세로선은 내부 기준 ${pass}점`, 'matrix')}
         <div class="rp-quality">${dims.map(([k, label, desc]) => {
           const v = q.dimensions[k]?.score;
           return v == null ? '' : `<div class="rp-q-row"><span class="rp-q-label"><b>${label}</b><small>${desc}</small></span><span class="rp-q-track"><i class="${tone(v)}" style="width:${Math.max(0, Math.min(100, v))}%"></i><em style="left:${pass}%"></em></span><span class="rp-q-val">${num(v)}</span></div>`;
         }).join('')}</div>
-        <p class="rp-note">일관성은 정답 비교가 아닙니다. 게임을 추천하면서도 불만을 쓰는 리뷰가 있기 때문입니다. 추천 비율이 Steam 전체와 가까운지는 점수에 넣지 않습니다. 수집할 때 그 비율에 맞춰 건수를 나누므로 언제나 높게 나오기 때문입니다.</p>
+        <p class="rp-note">이 점수는 누락·추천 여부와의 일치·분석 가능성을 살피는 내부 기준이며 AI 정확도나 통계적 신뢰도를 뜻하지 않습니다.</p>
         ${issues.length ? `<ul class="rp-issues">${issues.map(i => `<li>${esc(i)}</li>`).join('')}</ul>` : ''}
       </section>`;
   }
+
 
   /* ---------------- 불만 분석 ---------------- */
   let deepTheme;
@@ -307,7 +337,11 @@ window.ReviewPages = (() => {
   }
   // 카드 머리의 한 줄 인사이트. 한 장 보고서도 같은 문장을 쓴다.
   const churnGap = t => (t.early_share ?? 0) - (t.later_share ?? 0);
+  // 한 줄 문장으로 말할 만큼 건수가 있는가. 두 묶음이 각각 30건, 그 주제가 5건은 되어야 리뷰 한두 개로 뒤집히지 않는다.
+  const churnEnough = (t, c) => t.early >= 5 && c.early_n >= 30 && c.later_n >= 30;
   const agreeGap = t => (t.vote_share || 0) - (t.count_share || 0);
+  // 도움됨은 리뷰 하나가 수십 표를 몰아 받는다. 전체 50표가 안 되거나, 그 주제에서 표를 받은 리뷰가 5건이 안 되면 비율을 견주지 않는다.
+  const agreeEnough = (t, a) => a.total_votes >= 50 && t.votes >= 10 && t.voted >= 5;
   const churnPick = deep => [...deep.churn.topics].filter(t => t.early >= 2).sort((a, b) => churnGap(b) - churnGap(a))[0];
   const agreePick = deep => [...deep.agreed.topics].sort((a, b) => agreeGap(b) - agreeGap(a))[0];
   const lines = {
@@ -318,16 +352,19 @@ window.ReviewPages = (() => {
     churn: deep => {
       const p = churnPick(deep), h = deep.early_hours;
       if (!deep.churn.early_n) return '';
-      return p && churnGap(p) > 5 ? `${h}시간 미만에 쓴 비추천 리뷰에서 <b>'${esc(p.name)}'</b> 불만이 더 자주 나옵니다 (${num(p.early)}/${num(deep.churn.early_n)}건 vs ${num(p.later)}/${num(deep.churn.later_n)}건).`
-        : `${h}시간 전후로 비추천 리뷰가 말하는 불만이 크게 다르지 않습니다.`;
+      return p && churnGap(p) > 5 && churnEnough(p, deep.churn)
+        ? `수집한 비추천 리뷰에서 <b>'${esc(p.name)}'</b> 불만은 ${h}시간 미만에 더 자주 적혔습니다 (${num(p.early)}/${num(deep.churn.early_n)}건 vs ${num(p.later)}/${num(deep.churn.later_n)}건).`
+        : p && churnGap(p) > 5 ? `${h}시간 전후의 차이를 살피기에는 수집한 리뷰가 적습니다.`
+        : `수집한 비추천 리뷰에서 ${h}시간 전후의 불만 비율 차이는 5%p 이하입니다.`;
     },
     agreed: deep => {
       const p = agreePick(deep);
       if (!deep.agreed.total_votes) return '';
-      return p && agreeGap(p) > 5 ? `<b>'${esc(p.name)}'</b> 불만은 건수로는 ${pct(p.count_share)}지만, Steam 도움됨은 ${pct(p.vote_share)}를 받았습니다.`
+      return p && agreeGap(p) > 5 && agreeEnough(p, deep.agreed) ? `<b>'${esc(p.name)}'</b> 불만은 건수로는 ${pct(p.count_share)}지만, Steam 도움됨은 ${pct(p.vote_share)}를 받았습니다 (${num(p.votes)}/${num(deep.agreed.total_votes)}표).`
+        : p && agreeGap(p) > 5 ? `도움됨을 받은 불만 리뷰가 적어 주제끼리 견주기 어렵습니다 (모두 ${num(deep.agreed.total_votes)}표).`
         : 'Steam 도움됨은 불만 건수와 비슷하게 나뉘어 있습니다.';
     },
-    wants: deep => deep.wants[0] ? `가장 많이 나온 요청은 <b>“${esc(deep.wants[0].text)}”</b>입니다 (${num(deep.wants[0].count)}건).` : '',
+    wants: deep => !deep.wants[0] ? '' : deep.wants[0].count < 2 ? '두 리뷰 이상이 똑같이 적은 요청은 없습니다. 아래는 리뷰 하나씩의 요청입니다.' : `가장 많이 나온 요청은 <b>“${esc(deep.wants[0].text)}”</b>입니다 (${num(deep.wants[0].count)}건).`,
   };
   const noComplaints = '<p class="rp-empty">불만 리뷰의 AI 메모(complaints_v3.jsonl)가 없습니다. 분석을 다시 실행하면 채워집니다.</p>';
   const head = (iconName, title, sub, insight) => cardHead(title, sub, iconName) + (insight ? `<p class="rp-insight">${insight}</p>` : '');
@@ -359,7 +396,7 @@ window.ReviewPages = (() => {
     const max = Math.max(...topics.flatMap(t => [t.early_share || 0, t.later_share || 0]), 1);
     el.innerHTML = head('clock', title, sub, lines.churn(deep))
       + `<div class="rp-legend"><span class="early">${h}시간 전 비추천 ${num(early_n)}건</span><span class="later">${h}시간 뒤 비추천 ${num(later_n)}건</span></div>`
-      + `<div class="rp-pairs">${topics.map(t => `<div class="rp-pair ${t === pick && gap(pick) > 5 ? 'is-top' : ''}"><b>${esc(t.name)}</b>
+      + `<div class="rp-pairs">${topics.map(t => `<div class="rp-pair ${t === pick && gap(pick) > 5 && churnEnough(pick, deep.churn) ? 'is-top' : ''}"><b>${esc(t.name)}</b>
           <span class="rp-ptrack early"><i style="width:${(t.early_share || 0) / max * 100}%"></i><em>${pct(t.early_share ?? 0)} · ${num(t.early)}/${num(early_n)}건</em></span>
           <span class="rp-ptrack later"><i style="width:${(t.later_share || 0) / max * 100}%"></i><em>${pct(t.later_share ?? 0)} · ${num(t.later)}/${num(later_n)}건</em></span></div>`).join('')}</div>`
       + `<p class="rp-note">비율 = 각 묶음의 비추천 리뷰 중 그 주제를 불만으로 말한 비율. 건수가 한 자릿수인 줄은 리뷰 한두 개로 뒤집히니 참고만 하세요. 플레이 시간이 짧다고 게임을 그만뒀다는 뜻은 아니고, 이 불만 때문에 비추천했는지도 알 수 없습니다.</p>`;
@@ -376,7 +413,7 @@ window.ReviewPages = (() => {
     const quote = reviews[0];
     el.innerHTML = head('up', title, sub, lines.agreed(deep))
       + `<div class="rp-legend"><span class="later">불만 건수 비율</span><span class="agree">도움됨 비율</span></div>`
-      + `<div class="rp-pairs">${topics.map(t => `<div class="rp-pair ${t === pick && gap(pick) > 5 ? 'is-top' : ''}"><b>${esc(t.name)}</b>
+      + `<div class="rp-pairs">${topics.map(t => `<div class="rp-pair ${t === pick && gap(pick) > 5 && agreeEnough(pick, deep.agreed) ? 'is-top' : ''}"><b>${esc(t.name)}</b>
           <span class="rp-ptrack later"><i style="width:${(t.count_share || 0) / max * 100}%"></i><em>${pct(t.count_share)}</em></span>
           <span class="rp-ptrack agree"><i style="width:${(t.vote_share || 0) / max * 100}%"></i><em>${pct(t.vote_share)} · ${num(t.votes)}</em></span></div>`).join('')}</div>`
       + (quote ? `<figure class="rp-quote"><figcaption>도움됨이 가장 많은 불만 리뷰 · 도움됨 ${num(quote.helpful)} · ${quote.themes.map(esc).join(', ')}</figcaption><blockquote>${esc(window.ReviewDashboard?.plain?.(quote.content) ?? quote.content)}${quote.truncated ? '…' : ''}</blockquote></figure>` : '')

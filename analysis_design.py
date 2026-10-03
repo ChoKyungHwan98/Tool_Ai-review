@@ -90,7 +90,7 @@ def design_log(sample_design, counts, usage, n_ai_topics, merges, themes, game="
         "step": "무엇을", "who": "사람",
         "text": " · ".join(x for x in [game, LANGS.get(params.get("language"), params.get("language") or ""),
                                          f"{since.replace('-', '.')} 이후" if since else "전체 기간",
-                                         "공감순" if params.get("sort") == "helpful" else "최신순"] if x),
+                                         {"helpful": "공감순", "random": "무작위"}.get(params.get("sort"), "최신순")] if x),
     }]
     planned = design.get("n_total")
     target = params.get("target_error_pct")
@@ -104,8 +104,11 @@ def design_log(sample_design, counts, usage, n_ai_topics, merges, themes, game="
     if (usage or {}).get("model"):
         rows.append({"step": "분석 모델", "who": "사람", "text": usage["model"]})
     if counts.get("collected") is not None and counts.get("analyzed") is not None:
+        short = counts.get("short_excluded", counts["collected"] - counts["analyzed"])
+        missing = counts.get("analysis_missing_eligible", 0)
         rows.append({"step": "분석 대상", "who": "규칙",
-                     "text": f"너무 짧은 리뷰 {counts['collected'] - counts['analyzed']:,}건 제외 → AI 분석 {counts['analyzed']:,}건"})
+                     "text": f"너무 짧은 리뷰 {short:,}건 제외 → AI 분석 {counts['analyzed']:,}건"
+                             + (f" · 분석 대상 {missing:,}건 누락" if missing else "")})
     rows.append({"step": "주제 제안", "who": "AI",
                  "text": f"리뷰를 읽고 주제 {n_ai_topics}개를 제안, 리뷰마다 주제와 칭찬·불만을 붙임"})
     rows.append({"step": "주제 합치기", "who": "규칙",

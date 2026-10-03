@@ -1,10 +1,10 @@
-"""신뢰도 검증 (강의 session-44 핵심: 신뢰도 ≠ 정확도)
+"""AI 분류와 Steam 추천 여부의 일치 점검.
 
 목표:
 1. 487건 분석 결과에서 5카테고리 × 6건 = 30건 검증 세트 자동 선정
 2. 30건을 LLM에 재호출 (confidence 필드 포함 프롬프트)
-3. voted_up을 ground truth로 사용해서 정확도 측정
-4. 신뢰도 분포 + 4사분면 매트릭스 + 위험 케이스(고신뢰 오답) 식별
+3. voted_up과 AI 감성 분류의 일치율 측정 (정답률 아님)
+4. AI가 보고한 확신도 분포와 추천 여부가 반대인 사례 식별
 5. verify_report.json 생성 → 대시보드 "신뢰도 검증" 탭에서 시각화
 
 5카테고리 (강의 표준):
@@ -16,7 +16,7 @@
 
 실행:
   python verify_analysis.py --select   # 30건 선정 + LLM 재분석 ($0.005)
-  python verify_analysis.py --report   # 정확도/신뢰도 측정 + JSON 저장
+  python verify_analysis.py --report   # 추천 여부 일치율/확신도 점검 + JSON 저장
   python verify_analysis.py            # 위 두 단계 모두 실행
 """
 
@@ -221,6 +221,12 @@ def run_selection_and_reanalysis():
     rows = []
     with open(get_analysis_csv(), "r", encoding="utf-8-sig", newline="") as f:
         rows = list(csv.DictReader(f))
+    # 분석 CSV의 content는 500자로 잘려 있다. 재검증에는 저장된 원문 전체를 쓴다.
+    with open(cfg.REVIEWS_CSV, "r", encoding="utf-8-sig", newline="") as f:
+        original_content = {r["recommendationid"]: r.get("content", "") for r in csv.DictReader(f)}
+    rows = [r for r in rows if r.get("recommendationid") in original_content]
+    for r in rows:
+        r["content"] = original_content[r["recommendationid"]]
     print(f"\n[로드] {len(rows)}건 분석 결과")
 
     print("\n[카테고리 분류 + 30건 균등 선정]")
@@ -268,7 +274,7 @@ def run_selection_and_reanalysis():
 
 # ============ 3. 정확도/신뢰도 측정 ============
 def voted_up_to_expected(vu: int) -> str:
-    """voted_up을 기대 sentiment로 매핑 (ground truth 신호)."""
+    """Steam 추천 여부를 비교용 라벨로 매핑한다. 글의 감성 정답은 아니다."""
     return "POSITIVE" if vu == 1 else "NEGATIVE"
 
 
@@ -312,7 +318,7 @@ def build_report(results: list) -> dict:
     n_cautious = sum(1 for r in results if r["outcome"] == "cautious")
     n_wrong    = sum(1 for r in results if r["outcome"] == "wrong")
     accuracy_strict  = n_correct / n * 100
-    accuracy_lenient = (n_correct + n_cautious) / n * 100  # 보수적 판정 = 부분 정답
+    accuracy_lenient = (n_correct + n_cautious) / n * 100  # 일치 또는 혼합/중립
 
     confidences = [r["confidence"] for r in results]
     avg_conf = sum(confidences) / n * 100
@@ -320,10 +326,10 @@ def build_report(results: list) -> dict:
     # 4사분면 매트릭스 (신뢰도 vs 정답)
     # 평가 기준: outcome=="wrong"만 실제 오답으로 처리, "cautious"는 위험 카운트에서 제외
     matrix = {
-        "high_conf_correct":   {"count": 0, "label": "고신뢰 + 정답",  "interpretation": "이상적 (AI 확신 + 맞음)", "tone": "best"},
-        "high_conf_incorrect": {"count": 0, "label": "고신뢰 + 오답",  "interpretation": "가장 위험 (AI 확신했는데 틀림)", "tone": "danger"},
-        "low_conf_correct":    {"count": 0, "label": "저신뢰 + 정답",  "interpretation": "운 좋게 맞음 (재검토 권장)", "tone": "warn"},
-        "low_conf_incorrect":  {"count": 0, "label": "저신뢰 + 오답",  "interpretation": "예상 가능한 실패",      "tone": "info"},
+        "high_conf_correct":   {"count": 0, "label": "높은 확신 + 추천 여부 일치", "interpretation": "원문 확인 가능", "tone": "best"},
+        "high_conf_incorrect": {"count": 0, "label": "높은 확신 + 추천 여부 반대", "interpretation": "원문 확인 우선", "tone": "danger"},
+        "low_conf_correct":    {"count": 0, "label": "낮은 확신 + 추천 여부 일치", "interpretation": "원문 확인 권장", "tone": "warn"},
+        "low_conf_incorrect":  {"count": 0, "label": "낮은 확신 + 추천 여부 반대", "interpretation": "원문 확인 권장", "tone": "info"},
     }
     for r in results:
         is_high = r["confidence"] >= MID_CONF  # 0.75 기준 (강의)
@@ -402,14 +408,16 @@ def build_report(results: list) -> dict:
             "avg_confidence_pct": round(sum(r["confidence"] for r in bucket) / len(bucket) * 100, 1),
         })
 
-    gap = avg_conf - accuracy_strict
     return {
         "n_total": n,
         "n_correct": n_correct,
         "n_cautious": n_cautious,
         "n_wrong": n_wrong,
-        "accuracy_pct": round(accuracy_strict, 1),        # 엄격: voted_up과 직접 일치
-        "accuracy_lenient_pct": round(accuracy_lenient, 1),  # 관대: cautious도 부분 정답
+        "accuracy_pct": round(accuracy_strict, 1),  # 이전 파일과 호환되는 키. 의미는 추천 여부 일치율.
+        "accuracy_lenient_pct": round(accuracy_lenient, 1),
+        "recommendation_agreement_pct": round(accuracy_strict, 1),
+        "agreement_or_mixed_pct": round(accuracy_lenient, 1),
+        "metric_note": "Steam 추천 여부와 AI 감성 분류의 일치율입니다. 사람의 정답 판정이나 전체 AI 정확도가 아닙니다. 범주별로 의도적으로 고른 점검용 표본입니다.",
         "avg_confidence_pct": round(avg_conf, 1),
         "danger_count": len(danger_cases),
         "thresholds": {"high": HIGH_CONF * 100, "mid": MID_CONF * 100},
@@ -420,19 +428,16 @@ def build_report(results: list) -> dict:
         "danger_cases": danger_cases,
         "samples": results,
         "insight": {
-            "title": "신뢰도 ≠ 정확도",
-            "gap_pct": round(gap, 1),
+            "title": "추천 여부와 AI 분류의 일치 점검",
+            "gap_pct": None,
             "interpretation": (
-                f"평균 신뢰도 {avg_conf:.1f}% vs 실제 정확도 {accuracy_strict:.1f}% "
-                f"(격차 {gap:+.1f}%p) — "
-                f"{'AI가 실제 능력보다 더 확신함 (overconfident)' if gap > 5 else ('AI 신뢰도와 정확도가 잘 보정됨' if abs(gap) <= 5 else 'AI가 실제보다 덜 확신함 (underconfident)')}. "
-                f"30건 중 {n_cautious}건은 MIXED/NEUTRAL로 보수적 판정 (관대 기준 정확도 {accuracy_lenient:.1f}%)."
+                f"점검한 {n}건 중 추천 여부와 AI 감성이 직접 일치한 비율은 {accuracy_strict:.1f}%입니다. "
+                f"MIXED/NEUTRAL {n_cautious}건은 일치·반대 어느 쪽으로도 판단하지 않았습니다. "
+                f"AI의 평균 확신도 {avg_conf:.1f}%는 정답 확률로 검증된 값이 아닙니다."
             ),
             "recommendations": [
-                f"고신뢰 오답 {len(danger_cases)}건 — 별도 검토 프로세스 필요 (가장 위험)",
-                f"신뢰도 < 75%인 결과는 반드시 사람이 검증 후 사용",
-                f"MIXED/NEUTRAL 판정은 AI의 신중함 — 단독 결정 근거로는 부족",
-                f"중요 의사결정에서는 LLM 결과 + 통계 보정 + 사람 리뷰 = 3중 확인",
+                f"확신도가 높지만 추천 여부와 반대인 사례 {len(danger_cases)}건은 원문 확인",
+                "실제 AI 정확도를 알려면 사람이 원문에 정답 라벨을 붙인 별도 검증 세트가 필요합니다",
             ],
         },
     }
@@ -450,18 +455,17 @@ def run_report():
     print("=" * 60)
     print(f"[신뢰도 검증 리포트]")
     print("=" * 60)
-    print(f"  엄격 정확도(strict):   {report['accuracy_pct']:.1f}% ({report['n_correct']}/{report['n_total']})")
-    print(f"  관대 정확도(lenient):  {report['accuracy_lenient_pct']:.1f}% (cautious 포함)")
-    print(f"  평균 신뢰도:           {report['avg_confidence_pct']:.1f}%")
-    print(f"  격차 (신뢰도-정확도): {report['insight']['gap_pct']:+.1f}%p")
-    print(f"  위험 케이스(고신뢰+오답): {report['danger_count']}건")
+    print(f"  추천 여부와 직접 일치: {report['recommendation_agreement_pct']:.1f}% ({report['n_correct']}/{report['n_total']})")
+    print(f"  일치 또는 혼합/중립:  {report['agreement_or_mixed_pct']:.1f}%")
+    print(f"  AI가 보고한 평균 확신도: {report['avg_confidence_pct']:.1f}% (정답 확률 아님)")
+    print(f"  높은 확신 + 추천 여부 반대: {report['danger_count']}건")
     print(f"  보수적 판정(MIXED/NEUTRAL): {report['n_cautious']}건")
     print()
     print(f"[4사분면 매트릭스] (cautious 제외, decisive {report['n_correct']+report['n_wrong']}건 기준)")
     for k, v in report["matrix"].items():
         print(f"  {v['label']:<18s}: {v['count']}건 — {v['interpretation']}")
     print()
-    print(f"[카테고리별 정확도]")
+    print(f"[카테고리별 추천 여부 일치율]")
     for c in report["category_accuracy"]:
         print(f"  {c['category_kr']:<16s}: {c['accuracy_pct']:5.1f}%  "
               f"(평균 신뢰도 {c['avg_confidence_pct']:.1f}%, n={c['n']})")

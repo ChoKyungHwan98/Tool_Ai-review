@@ -42,7 +42,7 @@ class TokenOptimizationTests(unittest.TestCase):
     def test_short_complaints_are_classified_without_treating_vote_as_sentiment(self):
         self.assertTrue(analyzer.should_classify({"content": "노잼", "voted_up": "0"}))
         self.assertTrue(analyzer.should_classify({"content": "버그", "voted_up": "1"}))
-        self.assertFalse(analyzer.should_classify({"content": "좋아", "voted_up": "1"}))
+        self.assertTrue(analyzer.should_classify({"content": "좋아", "voted_up": "1"}))
         self.assertFalse(analyzer.should_classify({"content": "ㅋ", "voted_up": "0"}))
         self.assertTrue(analyzer.needs_deep({"s": "P", "t": []},
                                              {"content": "좋은 점도 있지만 많이 불편합니다", "voted_up": "0"}))
@@ -52,7 +52,7 @@ class TokenOptimizationTests(unittest.TestCase):
             {"recommendationid": "1", "content": "저장 문제가 계속 반복됩니다"},
             {"recommendationid": "2", "content": "그래픽과 음악이 정말 좋습니다"},
             {"recommendationid": "3", "content": "새로운 리뷰가 추가되었습니다"},
-            {"recommendationid": "4", "content": "좋음"},
+            {"recommendationid": "4", "content": "ㅋ"},   # 한 글자는 분석하지 않는다
         ]
         with (self.folder / "reviews.csv").open("w", encoding="utf-8-sig", newline="") as stream:
             writer = csv.DictWriter(stream, fieldnames=rows[0].keys())

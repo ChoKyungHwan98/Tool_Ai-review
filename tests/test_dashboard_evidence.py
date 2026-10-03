@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from dashboard_evidence import build_evidence, evidence_page, review_hours
+from dashboard_evidence import build_evidence, evidence_page, review_hours, stage_profile
 from main import review_rows
 import analysis_design
 
@@ -49,6 +49,10 @@ class DashboardEvidenceTests(unittest.TestCase):
         self.assertEqual([c["n"] for c in e["cohorts"]], [1, 1, 0, 1])
         self.assertEqual(e["counts"]["unknown_playtime"], 1)
 
+    def test_even_sized_stage_uses_arithmetic_median(self):
+        profile = stage_profile("all", "all", ["1", "2"], {r["recommendationid"]: r for r in self.rows})
+        self.assertEqual(profile["hours"], 1.0)
+
     def test_review_cards_use_complete_source_without_analysis_csv(self):
         self.rows[0]["content"] = "긴 원문 " * 100
         self.rows[0]["language"] = "koreana"
@@ -73,9 +77,12 @@ class DashboardEvidenceTests(unittest.TestCase):
         self.assertEqual(storage["negative_recommended"], 1)
         self.assertEqual(building["mentions"], 2)
         self.assertEqual(building["pos"] + building["neg"], 3)
+        # 건축: 불만 1 / (칭찬 2 + 불만 1). 범위가 50%를 걸치므로 어느 쪽이 많은지 말하지 않는다.
+        self.assertLess(building["neg_range"][0], 50)
+        self.assertGreater(building["neg_range"][1], 50)
+        self.assertFalse(building["sure"])
         self.assertEqual(e["counts"]["complaint_reviews"], 2)
         self.assertEqual(e["counts"]["recommended_complaints"], 1)
-        self.assertEqual(storage["exclusion_delta"], 25.0)
 
     def test_heatmap_and_fun_use_their_own_denominators(self):
         e = build_evidence(self.folder, 42)

@@ -43,6 +43,18 @@ class CollectScopeTests(unittest.TestCase):
         self.assertEqual(params["filter"], "all")
         self.assertNotIn("day_range", params)
 
+    def test_random_pool_is_complete_only_after_reaching_the_scope_end(self):
+        cfg.COLLECT_SINCE, cfg.COLLECT_SORT = None, "random"
+        status = {"complete": False}
+        with patch.object(collector.httpx, "get", side_effect=[page([1, 2], "a")]), patch.object(collector.time, "sleep"):
+            collector.collect_reviews("all", 2, set(), scan_status=status)
+        self.assertFalse(status["complete"])
+
+        status = {"complete": False}
+        with patch.object(collector.httpx, "get", side_effect=[page([1, 2], "a"), page([], "b")]), patch.object(collector.time, "sleep"):
+            collector.collect_reviews("all", 3, set(), scan_status=status)
+        self.assertTrue(status["complete"])
+
 
 if __name__ == "__main__":
     unittest.main()

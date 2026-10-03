@@ -181,7 +181,7 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
   padding:var(--rd-pad) var(--rd-pad) 0;
 }
 .rd-pane-head > div:first-child { min-width:0; }
-.rd-pane-head > .rd-icon { width:20px; height:20px; color:var(--rd-sub); }
+.rd-pane-head > .rd-icon { display:none; }   /* 꾸밈 아이콘은 누를 수 있는 ⓘ와 헷갈린다 */
 .rd-pane-head h2 { font-size:16px; font-weight:600; line-height:1.4; color:var(--rd-ink); }
 .rd-pane-head p { margin:2px 0 0; font-size:13px; line-height:1.5; color:var(--rd-sub); }
 .rd-pane-head p:empty { display:none; }
@@ -242,6 +242,15 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
 .rd-donut-total { font-size:24px; font-weight:600; fill:var(--rd-ink); }
 .rd-donut-label { font-size:13px; fill:var(--rd-sub); }
 
+/* 추천 여부 × 반응 표 */
+.rd-cross { width:100%; margin-top:16px; border-collapse:collapse; font-size:14px; font-variant-numeric:tabular-nums; }
+.rd-cross caption { padding-bottom:8px; text-align:left; font-size:13px; color:var(--rd-sub); }
+.rd-cross :is(th, td) { padding:8px; border-top:1px solid var(--rd-line-soft); text-align:right; font-weight:400; color:var(--rd-ink); }
+.rd-cross thead :is(th, td) { border-top:0; padding-top:0; font-size:13px; color:var(--rd-sub); }
+.rd-cross tbody th { text-align:left; font-weight:600; }
+.rd-cross small { display:block; font-size:13px; font-weight:400; color:var(--rd-sub); }
+.rd-cross td.is-cross { background:var(--rd-soft); }
+
 /* ---------- IPA 매트릭스 ---------- */
 .rd-map { display:block; width:100%; height:auto; overflow:visible; }
 .rd-q-rest { fill:#F7F8FA; }
@@ -251,7 +260,10 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
 .rd-map-mid { stroke:#B0B8C1; stroke-dasharray:4 5; stroke-width:1; }
 .rd-map-axis { stroke:#B0B8C1; }
 .rd-map-tick { font-size:13px; fill:var(--rd-sub,#5F6977); }
-.rd-q-label { font-weight:600; fill:var(--rd-sub,#5F6977); }
+/* 영역 이름: 칸 한가운데에 까는 바탕 글자. 원과 주제 이름보다 뒤에 있으므로 옅게 */
+.rd-q-label { font-weight:700; fill:var(--rd-sub,#5F6977); fill-opacity:.5; pointer-events:none; }
+.rd-q-label.is-watch { fill:var(--rd-neg-ink,#74498C); }
+.rd-q-label.is-small { fill:var(--rd-pos-ink,#1A73C4); }
 .rd-q-label.is-fix { fill:var(--rd-neg-ink,#74498C); }
 .rd-q-label.is-keep { fill:var(--rd-pos-ink,#1A73C4); }
 .rd-q-count { font-size:13px; font-weight:400; fill:var(--rd-sub,#5F6977); }
@@ -305,7 +317,7 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
 .rd-why b { display:block; font-size:13px; font-weight:600; color:var(--rd-sub); }
 .rd-why ul { margin:-6px 0 0; padding-left:18px; }
 .rd-quote {
-  margin:0; padding:14px 16px; border-radius:var(--rd-radius); background:var(--rd-soft);
+  margin:0; border:solid var(--rd-soft); border-width:14px 16px; border-radius:var(--rd-radius); background:var(--rd-soft);
   font-size:14px; line-height:1.7; color:var(--rd-text);
   display:-webkit-box; -webkit-line-clamp:5; -webkit-box-orient:vertical; overflow:hidden;
 }
@@ -313,7 +325,7 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
 
 /* ---------- 가운데 줄 카드: 플레이 시간별 비추천율 · 플레이어가 즐긴 것 · 월별 추천률 ---------- */
 /* 주제 줄: 이름 · 막대(칭찬 + 불만) · 언급 수 · 불만 비율 */
-.rd-rank-head, .rd-rank { display:grid; grid-template-columns:112px minmax(0,1fr) 56px 72px; align-items:center; gap:12px; padding:0 12px; }
+.rd-rank-head, .rd-rank { display:grid; grid-template-columns:112px minmax(0,1fr) 56px 112px; align-items:center; gap:12px; padding:0 12px; }
 .rd-rank-head { height:28px; font-size:13px; color:var(--rd-sub); white-space:nowrap; }
 .rd-rank-head span:nth-child(n+3), .rd-rank-count, .rd-rank-share { text-align:right; font-variant-numeric:tabular-nums; }
 .rd-ranks { display:grid; gap:2px; }
@@ -330,6 +342,7 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
 .rd-rank-count { font-size:14px; color:var(--rd-text); }
 .rd-rank-share { font-size:14px; color:var(--rd-sub); }
 .rd-rank-share.is-neg { color:var(--rd-neg-ink); font-weight:700; }
+.rd-rank-share small { margin-right:8px; font-size:13px; font-weight:400; color:var(--rd-sub); }
 .rd-funs { display:grid; gap:16px; }
 .rd-fun-row { display:grid; grid-template-columns:240px minmax(0,1fr) 52px; gap:14px; align-items:center; }
 .rd-fun-name { display:flex; align-items:baseline; gap:8px; min-width:0; }
@@ -438,18 +451,22 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
 /* ---------- 반응형 ---------- */
 /* 한 줄 4칸이 좁아 글자가 잘리는 폭에서는 3칸 */
 @media (max-width:1400px) {
-  .rd-kpis { grid-template-columns:repeat(3,minmax(0,1fr)); }
+  .rd-kpis:not(.is-five) .rd-kpi { grid-template-columns:40px minmax(0,1fr); column-gap:12px; padding:20px; }
+  .rd-kpis:not(.is-five) .rd-kpi > .rd-icon { width:40px; height:40px; padding:10px; }
+  .rd-kpis:not(.is-five) .rd-kpi-value b { font-size:20px; }
   .rd-pane-trend, .rd-pane-mood { grid-column:1 / -1; }
+  /* 주제 줄과 IPA 매트릭스를 나란히 두면 매트릭스가 좁아 주제 이름을 적을 수 없다. 위아래로 쌓는다 */
+  .rd-pane-chart, .rd-pane-map { grid-column:1 / -1; }
   .rd-pane-mood .rd-mood { grid-template-columns:200px minmax(0,1fr); gap:32px; }
   .rd-pane-mood .rd-donut { width:100%; }
 }
-@media (max-width:1700px) {
+@media (max-width:1500px) {
   .rd-kpis.is-five { grid-template-columns:repeat(6,minmax(0,1fr)); }
   .rd-kpis.is-five .rd-kpi { grid-column:span 2; }
   .rd-kpis.is-five .rd-kpi:nth-child(n+4) { grid-column:span 3; }
 }
 @media (max-width:1180px) {
-  .rd-pane-chart, .rd-pane-map { grid-column:1 / -1; }
+  .rd-kpis:not(.is-five) { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .rd-pane-third { grid-column:span 6; }
   .rd-pane-half { grid-column:1 / -1; }
   .rd-voices { grid-template-columns:repeat(2,minmax(0,1fr)); }
@@ -490,9 +507,8 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
   .main-wrap > main { padding:8px 16px 40px; }
   .page { --rd-pad:16px; }
   .rd-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; margin-bottom:16px; }
-  .rd-kpis.is-five .rd-kpi { grid-template-columns:minmax(0,1fr); padding:16px; }
+  .rd-kpis:not(.is-five) .rd-kpi, .rd-kpis.is-five .rd-kpi { grid-template-columns:minmax(0,1fr); padding:16px; }
   .rd-thumb { display:none; }
-  .rd-kpi { grid-template-columns:minmax(0,1fr); }
   .rd-kpi > .rd-icon { display:none; }
   .rd-kpi > :not(.rd-icon):not(.rd-kpi-bar) { grid-column:1; }
   .rd-kpi small { white-space:normal; }
@@ -511,6 +527,7 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
   .rd-mood .rd-donut { width:180px; margin:0 auto; }
   .rd-export-menu { right:auto; left:0; }
   .rd-rank-head, .rd-rank { grid-template-columns:72px minmax(0,1fr) 44px 56px; gap:8px; padding:0 4px; }
+  .rd-rank-share small { display:none; }
   .rd-rank-head span:nth-child(2) { visibility:hidden; }
   .rd-cohort-top { grid-column:1 / -1; margin-top:-4px; }
   .rd-grid { gap:8px; }
