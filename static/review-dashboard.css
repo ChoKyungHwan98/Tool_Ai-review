@@ -276,6 +276,8 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
 .rd-dot-mark { stroke-width:1.5; }
 .rd-dot.is-praised .rd-dot-mark { fill:#DFEFFC; stroke:var(--rd-pos,#2794EB); }
 .rd-dot.is-disliked .rd-dot-mark { fill:#F1EAF5; stroke:var(--rd-neg,#8D61A5); }
+.rd-dot.is-unsure .rd-dot-mark { fill:#F2F4F6; stroke:#8B95A1; }   /* 칭찬·불만 어느 쪽이 많은지 불확실한 주제 */
+.rd-focus.is-unsure .rd-focus-badge { background:var(--rd-soft); color:var(--rd-text); }
 .rd-dot.is-strength .rd-dot-mark { fill:var(--rd-pos,#2794EB); stroke:#fff; stroke-width:2.5; }
 .rd-dot:is(.is-concern, .is-watch) .rd-dot-mark { fill:var(--rd-neg,#8D61A5); stroke:#fff; stroke-width:2.5; }
 .rd-dot-halo { opacity:.14; }

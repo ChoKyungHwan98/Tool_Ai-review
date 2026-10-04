@@ -1,9 +1,11 @@
 """자료 상태 점검. 수집·분류 결과에 빠진 것이 없는지 세 가지로 본다. AI를 부르지 않는다.
 
 1. 완전성      필수 값이 빈 리뷰·분류 결과의 비율
-2. 일관성      Steam 추천 여부와 AI가 읽은 반응이 정반대인 비율 (오답이라는 뜻은 아니다)
-3. 분석 가능성  너무 짧은 글과 "판단 불가" 응답의 비율. 분석 대상인데 결과가 없는 글이 있으면 그만큼 깎는다
+2. 분석 가능성  너무 짧은 글과 "판단 불가" 응답의 비율. 분석 대상인데 결과가 없는 글이 있으면 그만큼 깎는다
    (저장 파일의 키 이름은 예전 그대로 accuracy다. 정답과 견준 정확도가 아니다)
+
+Steam 추천 여부와 AI가 읽은 반응이 반대인 리뷰 수는 점수에 넣지 않고 따로 알려 준다(vote_text_gap).
+"추천하지만 버그는 짜증난다"처럼 둘이 다른 리뷰를 찾아내는 것이 이 도구가 하는 일이어서, 그런 리뷰가 많다고 감점하면 앞뒤가 맞지 않는다.
 
 AI 정답률이나 통계적 신뢰도를 재는 점수가 아니라, 다시 돌려야 할 만큼 자료가 비었는지 보는 내부 기준이다.
 화면 집계(dashboard_evidence)와 같은 파일을 같은 함수로 읽는다.
@@ -19,7 +21,7 @@ if sys.platform == "win32":
 from config import cfg
 import dashboard_evidence as evidence
 
-WEIGHTS = {"completeness": 0.375, "consistency": 0.3125, "accuracy": 0.3125}
+WEIGHTS = {"completeness": 0.5, "accuracy": 0.5}
 PASS_THRESHOLD = 80
 WARN_THRESHOLD = 60
 QUALITY_NOTE = "내부 자료 상태 점수입니다. 분석 누락을 다른 점수로 가리지 않도록 완료율로 상한을 둡니다. AI 정답률이나 통계적 신뢰도는 아닙니다."
@@ -44,16 +46,16 @@ def score_completeness(reviews, analyzed):
             "issues": issues}
 
 
-def score_consistency(reviews, analyzed):
-    """추천했는데 부정, 비추천했는데 긍정으로 읽힌 비율. 혼합은 어긋난 것으로 치지 않고, 판단 불가는 뺀다."""
+def vote_text_gap(reviews, analyzed):
+    """추천했는데 글은 부정, 비추천했는데 글은 긍정으로 읽힌 리뷰 수. 점수가 아니라 관찰값이다.
+
+    혼합은 다른 것으로 치지 않고, 판단 불가는 뺀다. 오답이라는 뜻이 아니다: 추천하면서 불만을 쓰는 리뷰는 실제로 있다."""
     checked = [(evidence.is_positive(reviews[rid]), a.get("s")) for rid, a in analyzed.items() if a.get("s") in ("P", "N", "M")]
-    if not checked:
-        return {"score": 0, "issues": ["반응이 분류된 리뷰가 없습니다"], "checked": 0, "inconsistent": 0, "inconsistent_pct": 100}
-    inconsistent = sum((up and s == "N") or (not up and s == "P") for up, s in checked)
-    pct = inconsistent / len(checked) * 100
-    return {"score": round(max(0, 100 - pct * 3), 1), "checked": len(checked), "inconsistent": inconsistent,
-            "inconsistent_pct": round(pct, 2),
-            "issues": [f"추천 여부와 반응이 반대인 리뷰 {pct:.1f}% (기준 15% 이내)"] if pct > 15 else []}
+    up_negative = sum(up and s == "N" for up, s in checked)
+    down_positive = sum(not up and s == "P" for up, s in checked)
+    differing = up_negative + down_positive
+    return {"checked": len(checked), "differing": differing, "up_negative": up_negative, "down_positive": down_positive,
+            "differing_pct": round(differing / len(checked) * 100, 2) if checked else None}
 
 
 def score_accuracy(reviews, analyzed, design):
@@ -94,23 +96,26 @@ def rescore(report):
                        else ("WARN", "주의") if overall >= WARN_THRESHOLD else ("FAIL", "실패"))
     return {"overall_score": round(overall, 1), "grade": grade, "grade_kr": grade_kr,
             "thresholds": {"pass": PASS_THRESHOLD, "warn": WARN_THRESHOLD},
-            "weights": WEIGHTS, "dimensions": dims, "metric_note": QUALITY_NOTE}
+            "weights": WEIGHTS, "dimensions": dims, "metric_note": QUALITY_NOTE,
+            "vote_text_gap": report.get("vote_text_gap")}
 
 
 def run_quality_check(directory=None):
     source = evidence.load_sources(directory or cfg.project_dir())
     reviews, analyzed, design = source[:3] if source else ({}, {}, {})
     return rescore({"dimensions": {"completeness": score_completeness(reviews, analyzed),
-                                   "consistency": score_consistency(reviews, analyzed),
-                                   "accuracy": score_accuracy(reviews, analyzed, design)}})
+                                   "accuracy": score_accuracy(reviews, analyzed, design)},
+                    "vote_text_gap": vote_text_gap(reviews, analyzed)})
 
 
 def main():
     report = run_quality_check()
     print(f"자료 상태 점검 — 종합 {report['overall_score']:.1f}점 [{report['grade_kr']}]")
-    for key, name in (("completeness", "완전성"), ("consistency", "일관성"), ("accuracy", "분석 가능성")):
+    for key, name in (("completeness", "완전성"), ("accuracy", "분석 가능성")):
         dim = report["dimensions"][key]
         print(f"  {name} {dim['score']:.1f}점" + "".join(f"\n    · {issue}" for issue in dim["issues"]))
+    gap = report["vote_text_gap"]
+    print(f"  (참고) 추천 여부와 글의 반응이 반대인 리뷰 {gap['differing']}건 / {gap['checked']}건 — 점수에 넣지 않습니다")
     return report
 
 

@@ -33,7 +33,6 @@ class MathAuditTests(unittest.TestCase):
         self.assertLessEqual(result["score"], 25)
         report = quality_check.rescore({"dimensions": {
             "completeness": quality_check.score_completeness(reviews, analyzed),
-            "consistency": quality_check.score_consistency(reviews, analyzed),
             "accuracy": result}})
         self.assertEqual(report["overall_score"], 25)   # 다른 점수가 만점이어도 빠진 만큼만 받는다
         self.assertEqual(report["grade"], "FAIL")
@@ -41,11 +40,18 @@ class MathAuditTests(unittest.TestCase):
         short = {str(i): {"recommendationid": str(i), "content": "ㅋ" if i else "충분히 긴 리뷰", "voted_up": "1"} for i in range(100)}
         self.assertGreaterEqual(quality_check.score_accuracy(short, analyzed, {})["score"], 0)
 
-    def test_quality_consistency_ignores_mixed_and_unknown(self):
-        reviews = {str(i): {"voted_up": "1"} for i in range(4)}
-        analyzed = {"0": {"s": "N"}, "1": {"s": "M"}, "2": {"s": "U"}, "3": {"s": "P"}}
-        result = quality_check.score_consistency(reviews, analyzed)
-        self.assertEqual((result["checked"], result["inconsistent"]), (3, 1))
+    def test_vote_and_text_gap_is_reported_but_never_lowers_the_score(self):
+        # "추천하지만 버그는 짜증난다" 같은 리뷰를 찾는 것이 도구의 일이다. 그런 리뷰가 많다고 감점하지 않는다.
+        reviews = {str(i): {"recommendationid": str(i), "content": "충분히 긴 리뷰", "voted_up": "1", "playtime_at_review_min": "60"} for i in range(4)}
+        analyzed = {"0": {"s": "N", "k": "a"}, "1": {"s": "M", "k": "a"}, "2": {"s": "U", "k": "a"}, "3": {"s": "P", "k": "a"}}
+        gap = quality_check.vote_text_gap(reviews, analyzed)
+        self.assertEqual((gap["checked"], gap["differing"], gap["up_negative"]), (3, 1, 1))   # 혼합은 다르다고 치지 않고, 판단 불가는 뺀다
+        self.assertNotIn("score", gap)
+        self.assertNotIn("consistency", quality_check.WEIGHTS)
+        all_negative = {k: {"s": "N", "k": "a"} for k in reviews}
+        build = lambda a: quality_check.rescore({"dimensions": {"completeness": quality_check.score_completeness(reviews, a),
+                                                                "accuracy": quality_check.score_accuracy(reviews, a, {})}})["overall_score"]
+        self.assertEqual(build(all_negative), build({k: {"s": "P", "k": "a"} for k in reviews}))
 
 if __name__ == "__main__":
     unittest.main()

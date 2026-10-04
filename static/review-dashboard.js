@@ -52,9 +52,10 @@ window.ReviewDashboard = (() => {
 
   // 칭찬이 더 많은 주제는 칭찬순, 불만이 더 많은 주제는 불만순. 차트에서 진하게 칠하는 두 주제를 고르는 기준이다.
   function groups() {
-    const praised = evidence.themes.filter(t => t.pos >= t.neg && t.mentions > 0)
+    // 칭찬과 불만 건수가 비슷해 어느 쪽이 많다고 말할 수 없는 주제(sure === false)는 어느 쪽에도 넣지 않는다.
+    const praised = evidence.themes.filter(t => t.pos >= t.neg && t.mentions > 0 && t.sure !== false)
       .sort((a,b) => b.pos - a.pos || a.neg - b.neg || a.name.localeCompare(b.name));
-    const disliked = evidence.themes.filter(t => t.neg > t.pos)
+    const disliked = evidence.themes.filter(t => t.neg > t.pos && t.sure !== false)
       .sort((a,b) => b.neg - a.neg || a.pos - b.pos || a.name.localeCompare(b.name));
     return {praised, disliked};
   }
@@ -68,6 +69,7 @@ window.ReviewDashboard = (() => {
     if (t.name === concern()?.name) return 'concern';
     if (t.name === strength()?.name) return 'strength';
     if (!concern() && t.name === loudest()?.name) return 'watch';
+    if (t.sure === false) return 'unsure';
     return t.neg > t.pos ? 'disliked' : 'praised';
   }
 
@@ -142,7 +144,7 @@ window.ReviewDashboard = (() => {
     });
 
     /* ---- 주제별 보기 ---- */
-    const negLed = topics.filter(t => t.neg > t.pos);
+    const negLed = topics.filter(t => t.neg > t.pos && t.sure !== false);   // 불확실한 주제는 세지 않는다
     const topPos = [...topics].sort((a,b) => b.pos - a.pos)[0], topFun = (evidence.fun || [])[0];
     // 화면마다 맨 위 숫자 카드 줄: 이 줄만 보고 그 화면에 무엇이 있는지 알 수 있게 한다
     if (topicRoot) topicRoot.innerHTML = `
@@ -164,7 +166,7 @@ window.ReviewDashboard = (() => {
           </div>
         </section>
         <section class="rd-pane rd-pane-map" aria-labelledby="rdMapTitle">
-          <header class="rd-pane-head"><div><h2 id="rdMapTitle">주제 지도</h2><p>오른쪽일수록 많이 언급 · 위일수록 불만 비율이 높음</p></div>${icon('matrix')}</header>
+          <header class="rd-pane-head"><div><h2 id="rdMapTitle">IPA 매트릭스</h2><p>오른쪽일수록 많이 언급 · 위일수록 불만 비율이 높음</p></div>${icon('matrix')}</header>
           <div class="rd-pane-body" id="rdMapChart"></div>
           <p class="rd-note">원을 누르면 아래 근거가 그 주제로 바뀝니다. 세로 점선은 언급 수 중앙값, 가로 점선은 불만 50%입니다. 원 크기도 언급 수입니다.</p>
         </section>
@@ -557,7 +559,7 @@ window.ReviewDashboard = (() => {
     const t = themeByName(selected), target = document.getElementById('rdDetail');
     if (!t) { target.innerHTML = '<div class="rd-empty">확인할 주제가 없습니다.</div>'; return; }
     const r = role(t);
-    const label = t.neg > t.pos ? '불만이 더 많음' : '칭찬이 더 많음';
+    const label = t.sure === false ? '어느 쪽이 많은지 불확실' : t.neg > t.pos ? '불만이 더 많음' : '칭찬이 더 많음';
     const definition = data.themes?.find(row => row.name === t.name)?.desc;
     const lead = t.neg > t.pos ? 'N' : 'P';
     const quote = t.examples?.[lead]?.[0] || t.examples?.[lead === 'N' ? 'P' : 'N']?.[0];
