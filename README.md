@@ -48,8 +48,8 @@ Steam 리뷰 API
 ## 설치
 
 ```powershell
-git clone https://github.com/ChoKyungHwan98/Ai_review.git
-cd Ai_review
+git clone https://github.com/ChoKyungHwan98/Tool_Ai-review.git
+cd Tool_Ai-review
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 pip install -r requirements.txt
