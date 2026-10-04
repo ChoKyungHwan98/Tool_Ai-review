@@ -16,7 +16,7 @@ window.ReviewPages = (() => {
       <small>${caption}</small>
     </${tag}>`;
   // 카드 제목 줄: 제목 + 설명, 오른쪽에 아이콘
-  const cardHead = (title, sub, iconName, extra = '') => `<header class="rp-card-head"><div><h2>${title}${extra}</h2>${sub ? `<p>${sub}</p>` : ''}</div>${iconName ? icon(iconName) : ''}</header>`;
+  const cardHead = (title, sub, iconName, side = '') => `<header class="rp-card-head"><div><h2>${title}</h2>${sub ? `<p>${sub}</p>` : ''}</div>${side}${iconName ? icon(iconName) : ''}</header>`;
   const MOODS = [
     {key:'POSITIVE', label:'긍정', cls:'pos', icon:'up', desc:'좋았다는 글'},
     {key:'MIXED', label:'혼합', cls:'mix', icon:'scale', desc:'좋은 점과 아쉬운 점이 함께'},
@@ -164,6 +164,16 @@ window.ReviewPages = (() => {
     const u = data?.usage || {}, stand = Object.entries(u.stand_ins || {}).sort((x, y) => y[1] - x[1]);
     const calls = ['A', 'B', 'C', 'D'].reduce((n, k) => n + (u[k]?.calls || 0), 0), standCalls = stand.reduce((n, [, v]) => n + v, 0);
     const short = m => String(m || '').split('/').pop().replace(':free', '');
+    // 내부 처리 다섯 단계. 지시문을 다 적지 않고, 단계마다 무엇을 했는지 한 문장으로만 적는다.
+    const lang = LANG_NAMES[params.language || data?.evidence?.language] || '';
+    const analyzedN = counts.analyzed, shortN = counts.short_excluded ?? 0;
+    const steps = [
+      ['리뷰 모으기', '규칙', random ? `Steam ${esc(lang)} 리뷰 ${num(pop.total || pool?.size)}건을 ${pool?.complete ? '끝까지 ' : ''}훑고, 그중 ${num(collected)}건을 무작위로 뽑았습니다.` : `Steam ${esc(lang)} 리뷰를 ${sortLabel}으로 ${num(collected)}건 모았습니다.`],
+      ['주제 찾기', 'AI', `리뷰 일부를 읽고 이 게임에서 자주 나오는 주제 ${num(data?.evidence?.n_ai_topics)}개를 정했습니다.`],
+      ['리뷰 분류', 'AI', `${num(analyzedN)}건을 하나씩 읽고 긍정·부정과 주제를 붙였습니다.${shortN ? ` 한 글자짜리 ${num(shortN)}건은 읽지 않았습니다.` : ''}`],
+      ['불만 읽기', 'AI', '불만이 담긴 리뷰를 다시 읽고 무슨 문제인지, 왜 그런지, 무엇을 바라는지 적었습니다.'],
+      ['세기와 요약', '규칙', '건수와 비율은 프로그램이 셉니다. 주제별 요약 문장만 AI가 썼습니다.'],
+    ];
     // 맨 윗줄은 다른 화면과 같은 숫자 카드다. 이름 자리에 질문을, 값 자리에 답을 둔다.
     box.innerHTML = `
       <div class="rd-kpis">
@@ -171,28 +181,18 @@ window.ReviewPages = (() => {
           random && pool?.complete ? `${since ? `${since} 이후 ` : ''}${num(pop.total || pool.size)}건을 끝까지 훑고 무작위로 뽑음`
             : random ? '무작위로 뽑았지만 끝까지 훑지는 못함' : `${sortLabel}으로 수집 · 무작위 표본이 아님`)}
         ${kpi('추천 비율은 믿을 만한가', 'scale', promise?.kept ? '예' : '말하기 어려움', '', promise?.kept ? `오차범위 ±${num(promise.analyzed_margin)}%` : '',
-          (popNegRate != null && colNegRate != null ? `비추천 · Steam 전체 ${pct(popNegRate)} · 수집한 리뷰 ${pct(colNegRate)}` : 'Steam 전체와 견줄 기록이 없음') + (gapNote ? ' · 수집 기간이 어긋남' : ''), 'div', gapNote ? `title="${gapNote.trim()}"` : '', promise?.kept ? '' : 'is-neg')}
+          promise && !promise.kept ? esc((promise.checks.find(c => !c.ok) || {}).text || '무작위로 끝까지 훑어 뽑지 않았습니다')
+            : (popNegRate != null && colNegRate != null ? `비추천 · Steam 전체 ${pct(popNegRate)} · 수집한 리뷰 ${pct(colNegRate)}` : 'Steam 전체와 견줄 기록이 없음') + (gapNote ? ' · 수집 기간이 어긋남' : ''), 'div', gapNote ? `title="${gapNote.trim()}"` : '', promise?.kept ? '' : 'is-neg')}
         ${kpi('주제별 숫자는 믿을 만한가', 'info', '원문 확인 필요', '', '',
           `AI 분류${clash ? ` · 추천과 반대로 분류한 글 ${num(clash)}건` : ''}`, 'div', counts.themed != null ? `title="주제가 붙은 ${num(counts.themed)}건에서 나온 숫자입니다"` : '', 'is-neg')}
         ${u.model ? kpi('어느 AI가 읽었나', 'spark', standCalls ? '다른 모델이 대신 답함' : '고른 모델 그대로', '', '',
           standCalls ? `${esc(short(u.model))} 대신 ${esc(short(stand[0][0]))} · ${num(calls)}번 중 ${num(standCalls)}번` : `${esc(short(u.model))} · ${num(calls)}번`, 'div', `title="${esc(u.model)}"`, standCalls ? 'is-neg' : '') : ''}
       </div>
-      <div class="rp-grid rp-method">
-        <div class="rp-method-main">${designLogHTML(data?.design_log)}</div>
-        <div class="rp-method-side">${promiseHTML(promise)}${biasHTML(data?.evidence?.bias)}</div>
-      </div>`;
-  }
-
-  // 표본 오차는 수집 범위·건수·목표 오차·분석 완료 조건을 모두 확인한 뒤 표시한다.
-  function promiseHTML(p) {
-    if (!p) return '';
-    return `<section class="rp-card">
-        ${cardHead('오차범위를 말할 수 있는 조건', `세 가지가 모두 "예"여야 ±${num(p.target)}%가 오차범위입니다 (95% 신뢰수준)`, 'matrix')}
-        ${p.kept ? '' : `<p class="rp-insight"><b>오차범위로 읽을 수 없습니다.</b> ±${num(p.target)}%는 수집 건수를 정할 때 쓴 계획 기준입니다.</p>`}
-        <ol class="rp-checks">${p.checks.map(c => `<li class="${c.ok ? 'is-ok' : 'is-no'}"><b>${c.ok ? '예' : '아니오'}</b><span>${esc(c.name)}<small>${esc(c.text)}</small></span></li>`).join('')}</ol>
-        ${p.kept ? '' : '<p class="rp-callout">무작위로 뽑고, 범위를 끝까지 훑고, 계획한 만큼 모아야 오차범위를 말할 수 있습니다.</p>'}
-        <p class="rp-note">이 오차는 수집 대상 리뷰의 추천 비율에만 해당합니다. 주제별 비율, AI 분류의 정확도, 리뷰를 쓰지 않은 유저는 포함하지 않습니다.</p>
-      </section>`;
+      <section class="rp-card rp-how">
+        ${cardHead('어떻게 분석했나', '왼쪽에서 오른쪽 순서로 진행합니다. 색 표시는 그 일을 누가 했는지입니다', '')}
+        <ol class="rp-flow">${steps.map(([name, who, text]) => `<li><span class="rp-who ${who === 'AI' ? 'ai' : 'rule'}">${who}</span><b>${name}</b><p>${text}</p></li>`).join('')}</ol>
+      </section>
+      ${biasHTML(data?.evidence?.bias)}`;
   }
 
   // 치우침 점검: 수집 → 분석 → 주제로 걸러질 때마다 남은 글의 성격이 달라지는지 잰다. 사람도 AI도 쓰지 않는다.
@@ -205,25 +205,11 @@ window.ReviewPages = (() => {
     const themed = rows.find(r => r.key === 'themed') || rows[1];
     const gap = themed.negative_rate - base.negative_rate, hours = themed.hours != null && base.hours != null ? themed.hours - base.hours : null;
     return `<section class="rp-card">
-        ${cardHead('걸러질 때마다 남는 글이 달라지는가', '색칠한 칸은 수집한 리뷰 전체와 차이가 큰 값 · 플레이 시간과 글 길이는 가운데 값', 'scale')}
+        ${cardHead('주제가 붙은 글은 전체와 얼마나 다른가', '주제별 숫자는 주제가 붙은 글에서만 나옵니다 · 색칠한 칸은 전체와 차이가 큰 값 · 플레이 시간과 글 길이는 가운데 값', 'scale')}
         <table class="rd-cross"><thead><tr><td></td><th scope="col">비추천</th><th scope="col">플레이 시간</th><th scope="col">글 길이</th></tr></thead>
           <tbody>${rows.map(r => `<tr><th scope="row">${esc(r.name)}<small>${num(r.n)}건</small></th>
             ${cell(r, 'negative_rate', pct, () => 2)}${cell(r, 'hours', v => `${num(Math.round(v))}시간`, v => Math.max(5, v * .25))}${cell(r, 'length', v => `${num(v)}자`, v => Math.max(5, v * .5))}</tr>`).join('')}</tbody></table>
         <p class="rp-callout">주제 숫자가 나오는 <b>${esc(themed.name)} ${num(themed.n)}건</b>은 수집한 리뷰 전체보다 비추천이 <b>${Math.abs(gap).toFixed(1)}%p</b> ${hours == null ? (gap >= 0 ? '많습니다' : '적습니다') : `${gap >= 0 ? '많고' : '적고'}, 플레이 시간이 <b>${num(Math.abs(Math.round(hours)))}시간</b> ${hours >= 0 ? '깁니다' : '짧습니다'}`}.</p>
-      </section>`;
-  }
-
-  // 분석 설계서: 단계마다 누가 정했는지(사람 · AI · 규칙)와 무엇을 정했는지
-  function designLogHTML(rows) {
-    if (!rows?.length) return '';
-    const whoClass = w => w.startsWith('사람') ? 'human' : w.startsWith('AI') ? 'ai' : 'rule';
-    return `<section class="rp-card rp-design">
-        ${cardHead('분석 순서와 담당', '단계마다 사람 · AI · 규칙 중 누가 처리했는지', 'report')}
-        <ol class="rp-steps">${rows.map(r => `<li>
-          <span class="rp-step-name">${esc(r.step)}</span>
-          <span class="rp-who ${whoClass(r.who)}">${esc(r.who)}</span>
-          <span class="rp-step-text">${esc(r.text)}${r.details?.length ? `<ul>${r.details.map(d => `<li>${esc(d)}</li>`).join('')}</ul>` : ''}</span></li>`).join('')}</ol>
-        <p class="rp-note">분석기는 숫자와 근거를 보여줍니다. 원문을 확인하고 무엇을 고칠지 정하는 판단은 사람의 몫입니다.</p>
       </section>`;
   }
 
@@ -279,29 +265,27 @@ window.ReviewPages = (() => {
     const list = items => `<ul>${items.map(x => `<li><span class="rp-clamp" title="${x.replace(/<[^>]+>/g, '')}">${x}</span></li>`).join('')}</ul>`;
     const whys = notes.filter(n => n.why).slice(0, 2);
     const cells = (t.cells || []).map((c, i) => ({...c, label: ev.cohorts?.[i]?.label || ''}));
-    const top = Math.max(0, ...cells.filter(c => c.denominator >= 30).map(c => c.rate || 0));
     const quotes = (t.examples?.N || []).slice(0, 3);
     const summed = Boolean(act.prob || act.why);
-    const card = (cls, title, sub, body, note) => `<section class="rp-card ${cls}">${cardHead(title, sub, '')}${body}${note ? `<p class="rp-note">${note}</p>` : ''}</section>`;
+    const card = (cls, title, sub, body, note, extra = '') => `<section class="rp-card ${cls}">${cardHead(title, sub, '', extra)}${body}${note ? `<p class="rp-note">${note}</p>` : ''}</section>`;
+    // 읽는 순서: 무슨 일인가 → 왜 그런가 → 무엇을 바라나, 그다음 언제 나오나와 실제 리뷰
     document.getElementById('rpProblem').innerHTML = `
-      <section class="rp-card rp-phead"><div><h2>${esc(t.name)} · 불만 ${num(t.neg)}건</h2><p>${t.negative_recommended != null ? `불만을 쓴 ${num(t.neg)}건 중 ${num(t.negative_recommended)}건은 게임을 추천했습니다 · ` : ''}칭찬은 ${num(t.pos)}건</p></div>
-        <button type="button" class="rd-btn" data-reviews="${esc(t.name)}">불만 리뷰 ${num(t.neg)}건 보기</button></section>
+      <h2 class="rp-ptitle">${esc(t.name)}<small>불만 ${num(t.neg)}건${t.negative_recommended != null ? ` · 그중 ${num(t.negative_recommended)}건은 그래도 게임을 추천했습니다` : ''}</small></h2>
       <div class="rp-pthree">
         ${card('', '무슨 일인가', summed ? 'AI가 요약한 문장' : '리뷰마다 AI가 적어 둔 메모',
           act.prob ? `<p>${esc(act.prob)}</p>` : notes.length ? list(notes.slice(0, 3).map(n => esc(n.prob))) : '<p class="is-none">불만 메모가 없습니다.</p>',
           summed ? 'AI가 이 주제의 불만 리뷰를 요약한 문장입니다. 원문으로 확인해 주십시오.' : 'AI가 리뷰마다 적어 둔 메모이고, 도움됨이 많은 리뷰부터 보여 줍니다. AI가 주제를 잘못 붙였을 수 있으니 원문으로 확인해 주십시오.')}
-        ${card('', '리뷰가 말하는 원인', summed && act.why ? 'AI가 요약한 문장' : '리뷰에 적힌 문장',
-          act.why ? `<p>${esc(act.why)}</p>` : whys.length ? list(whys.map(n => `“${esc(n.why)}”`)) : '<p class="is-none">원인을 적은 리뷰가 없습니다.</p>')}
-        ${card('', '플레이어가 바라는 것', '리뷰에 적힌 요청 그대로',
+        ${card('', '왜 그런가', summed && act.why ? 'AI가 요약한 문장' : '리뷰에 적힌 문장',
+          act.why ? `<p>${esc(act.why)}</p>` : whys.length ? list(whys.map(n => `“${esc(n.why)}”`)) : '<p class="is-none">이유를 적은 리뷰가 없습니다.</p>')}
+        ${card('', '무엇을 바라나', '리뷰에 적힌 요청 그대로',
           wants.length ? list(wants.map(w => `“${esc(w.text)}” <span>${w.count > 1 ? `${num(w.count)}건 · ` : ''}도움됨 ${num(w.votes)}</span>`)) : '<p class="is-none">구체적으로 요청한 리뷰가 없습니다.</p>')}
       </div>
       <div class="rp-ptwo">
-        ${card('', '언제 나오나', '플레이 시간 구간별 이 불만의 비율',
-          `<div class="rp-pcols" role="img" aria-label="${cells.map(c => `${c.label} ${c.denominator >= 30 ? pct(c.rate) : '표본 적음'}`).join(', ')}">${cells.map(c => { const small = c.denominator < 30;
-            return `<div class="rp-pcol ${!small && top && c.rate === top ? 'is-max' : ''}" title="${esc(c.label)} · ${num(c.count)} / ${num(c.denominator)}건"><b>${small ? '표본 적음' : pct(c.rate)}</b><span><i style="height:${small || !top ? 0 : Math.max(4, c.rate / top * 100)}%"></i></span><em>${esc(c.label)}</em></div>`; }).join('')}</div>`,
-          '그 구간의 AI 분석 리뷰 중 이 주제를 불만으로 말한 비율입니다. 30건 미만 구간은 표시하지 않습니다.')}
+        ${card('', '언제 나오나', '플레이 시간별로, 리뷰 100건 중 이 불만을 말한 건수', window.ReviewDashboard?.whenHTML?.(cells) || '',
+          '그 구간의 AI 분석 리뷰 중 이 주제를 불만으로 말한 리뷰의 비율입니다. 리뷰가 30건이 안 되는 구간은 표시하지 않습니다.')}
         ${card('', '실제 리뷰', '이 불만이 붙은 리뷰',
-          quotes.length ? quotes.map(q => `<blockquote><span>${esc(plain(q.content))}${q.truncated ? '…' : ''}</span></blockquote><p class="rp-pwho">${q.recommended ? '게임 추천' : '게임 비추천'}${q.hours == null ? '' : ` · ${num(Math.round(q.hours))}시간 플레이`}${q.helpful ? ` · 도움됨 ${num(q.helpful)}` : ''}</p>`).join('') : '<p class="is-none">보여 줄 리뷰가 없습니다.</p>')}
+          quotes.length ? quotes.map(q => `<blockquote><span>${esc(plain(q.content))}${q.truncated ? '…' : ''}</span></blockquote><p class="rp-pwho">${q.recommended ? '게임 추천' : '게임 비추천'}${q.hours == null ? '' : ` · ${num(Math.round(q.hours))}시간 플레이`}${q.helpful ? ` · 도움됨 ${num(q.helpful)}` : ''}</p>`).join('') : '<p class="is-none">보여 줄 리뷰가 없습니다.</p>',
+          '', `<button type="button" class="rd-btn" data-reviews="${esc(t.name)}">${num(t.neg)}건 모두 보기</button>`)}
       </div>`;
   }
 

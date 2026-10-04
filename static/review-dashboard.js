@@ -420,8 +420,8 @@ window.ReviewDashboard = (() => {
     const share = themeNegShare;
     // 넓은 화면에서 원만 작게 남지 않도록 차트 폭에 맞춰 키운다(최대 1.6배)
     // 원 넓이가 언급 리뷰 수에 비례한다(반지름 = √건수). 가장 큰 원은 그림 짧은 변의 6%쯤으로 잡아 원끼리 덜 겹치게 한다.
-    const biggest = Math.max(12, Math.min(22, Math.min(pw, ph) * .06));
-    const radius = t => Math.max(4, biggest * Math.sqrt(t.mentions / maxM));
+    const biggest = Math.max(9, Math.min(15, Math.min(pw, ph) * .04));
+    const radius = t => Math.max(3.5, biggest * Math.sqrt(t.mentions / maxM));
     const dots = topics.map(t => ({t, r: role(t), cx: x(t.mentions), cy: y(share(t)), rad: radius(t)}));
     const hero = r => ['concern','strength','watch'].includes(r);
     // 라벨: 중요한 주제부터 빈 자리에 놓고, 자리가 없으면 생략(마우스를 올리면 이름이 보임)
@@ -495,7 +495,7 @@ window.ReviewDashboard = (() => {
       ${quadLabels}
       ${tick(L - 6, T + 4, '100%')}${tick(L - 6, ym + 4, '50%')}${tick(L - 6, H - B + 4, '0%')}
       ${logScale ? xTickText : tick(L, H - 8, '0', 'start')}${tick(xm, H - 8, `중앙값 ${num(Math.round(median))}건`, 'middle')}${tick(W - R, H - 8, axisName, 'end')}
-      ${[...dots].sort((a,b) => (a.t.name === selected || hero(a.r)) - (b.t.name === selected || hero(b.r)) || b.rad - a.rad).map(d => `<g class="rd-dot is-${d.r}" data-action="select" data-theme="${esc(d.t.name)}" tabindex="0" role="button" aria-pressed="${selected === d.t.name}" aria-label="${esc(d.t.name)}: 언급 ${d.t.mentions}건, 불만 ${Math.round(share(d.t) * 100)}%, 칭찬 ${d.t.pos}건, 불만 ${d.t.neg}건"><title>${esc(d.t.name)} · 언급 ${num(d.t.mentions)}건 · 칭찬 ${num(d.t.pos)} · 불만 ${num(d.t.neg)} (${Math.round(share(d.t) * 100)}%)</title>${d.rad < 12 ? `<circle cx="${d.cx}" cy="${d.cy}" r="${d.rad + 6}" class="rd-dot-hit"/>` : ''}${hero(d.r) ? `<circle cx="${d.cx}" cy="${d.cy}" r="${d.rad + 8}" class="rd-dot-halo"/>` : ''}<circle cx="${d.cx}" cy="${d.cy}" r="${d.rad + 4}" class="rd-dot-ring"/><circle cx="${d.cx}" cy="${d.cy}" r="${d.rad}" class="rd-dot-mark"/></g>`).join('')}
+      ${[...dots].sort((a,b) => (a.t.name === selected || hero(a.r)) - (b.t.name === selected || hero(b.r)) || b.rad - a.rad).map(d => `<g class="rd-dot is-${d.r}" data-action="select" data-theme="${esc(d.t.name)}" tabindex="0" role="button" aria-pressed="${selected === d.t.name}" aria-label="${esc(d.t.name)}: 언급 ${d.t.mentions}건, 불만 ${Math.round(share(d.t) * 100)}%, 칭찬 ${d.t.pos}건, 불만 ${d.t.neg}건"><title>${esc(d.t.name)} · 언급 ${num(d.t.mentions)}건 · 칭찬 ${num(d.t.pos)} · 불만 ${num(d.t.neg)} (${Math.round(share(d.t) * 100)}%)</title>${d.rad < 12 ? `<circle cx="${d.cx}" cy="${d.cy}" r="${d.rad + 6}" class="rd-dot-hit"/>` : ''}${hero(d.r) ? `<circle cx="${d.cx}" cy="${d.cy}" r="${d.rad + 6}" class="rd-dot-halo"/>` : ''}<circle cx="${d.cx}" cy="${d.cy}" r="${d.rad + 3}" class="rd-dot-ring"/><circle cx="${d.cx}" cy="${d.cy}" r="${d.rad}" class="rd-dot-mark"/></g>`).join('')}
       <g aria-hidden="true">${labels.join('')}</g>
     </svg>`;
   }
@@ -518,6 +518,17 @@ window.ReviewDashboard = (() => {
   }
 
   // 선택 주제: 칭찬/불만 비율, 불만이 나오는 플레이 구간, AI 요약, 실제 리뷰 한 줄
+  // '언제 나오나': 플레이 시간 구간마다 리뷰 100건 중 몇 건이 이 불만을 말했는지. 가로 막대 + 한 문장.
+  function whenHTML(cells) {
+    const ok = cells.filter(c => c.denominator >= 30 && c.rate != null), top = Math.max(0, ...ok.map(c => c.rate));
+    const peak = top ? ok.find(c => c.rate === top) : null;
+    return `<div class="rd-when" role="img" aria-label="${cells.map(c => `${c.label} ${c.denominator >= 30 ? `100건 중 ${c.rate}건` : '리뷰가 적어 표시하지 않음'}`).join(', ')}">
+        ${cells.map(c => { const small = c.denominator < 30;
+          return `<div class="rd-when-row ${!small && peak === c && c.count >= 5 ? 'is-max' : ''}${small ? ' is-small' : ''}"><span class="rd-when-label">${esc(c.label)}</span><span class="rd-when-track"><i style="width:${small || !top ? 0 : Math.max(2, c.rate / top * 100)}%"></i></span><span class="rd-when-val">${small ? '리뷰가 적음' : `<b>100건 중 ${num(c.rate)}건</b>`}<small>${num(c.denominator)}건 중 ${num(c.count)}건</small></span></div>`; }).join('')}
+      </div>${!peak ? '' : peak.count >= 5 ? `<p class="rd-when-say"><b>${esc(peak.label)}</b> 플레이한 사람이 이 불만을 가장 자주 말했습니다.</p>`
+        : `<p class="rd-when-say">가장 높은 구간도 ${num(peak.count)}건뿐이어서, 어느 구간에서 더 많이 나온다고 말하기는 어렵습니다.</p>`}`;   // 리뷰 두세 건으로 "가장 자주"라고 하지 않는다
+  }
+
   function renderDetail() {
     const t = themeByName(selected), target = document.getElementById('rdDetail');
     if (!t) { target.innerHTML = '<div class="rd-empty">확인할 주제가 없습니다.</div>'; return; }
@@ -528,21 +539,14 @@ window.ReviewDashboard = (() => {
     const lead = t.neg > t.pos ? 'N' : 'P';
     const quote = t.examples?.[lead]?.[0] || t.examples?.[lead === 'N' ? 'P' : 'N']?.[0];
     const cells = (t.cells || []).map((c, i) => ({...c, label: evidence.cohorts[i]?.label || ''}));
-    const reliable = cells.filter(c => c.denominator >= 30 && c.rate != null);
-    const cellMax = Math.max(1, ...reliable.map(c => c.rate));
     const when = t.neg && cells.length ? `<section class="rd-sec">
-        <h3>${icon('clock')}이 불만이 나오는 플레이 구간</h3>
-        <div class="rd-cols" role="img" aria-label="${cells.map(c => `${c.label} ${c.denominator ? pct(c.rate) : '자료 없음'}`).join(', ')}">
-          ${cells.map(c => { const small = c.denominator < 30; const h = small || c.rate == null ? 0 : Math.max(4, c.rate / cellMax * 100);
-            const top = !small && c.rate != null && c.rate === cellMax;
-            return `<div class="rd-col ${small ? 'is-small' : ''}${top ? ' is-max' : ''}" title="${esc(c.label)} · ${num(c.count)} / ${num(c.denominator)}건${small ? ' · 표본 적음' : ''}"><span class="rd-col-val">${small ? '표본 적음' : pct(c.rate)}</span><span class="rd-col-track"><i style="height:${h}%"></i></span><span class="rd-col-label">${esc(c.label)}</span></div>`; }).join('')}
-        </div>
-        <p class="rd-note">구간별 AI 분석 리뷰 중 이 주제 불만 비율 · 30건 미만 구간은 표시하지 않음</p>
+        <h3>${icon('clock')}언제 나오나 <small>플레이 시간별로, 리뷰 100건 중 이 불만을 말한 건수</small></h3>
+        ${whenHTML(cells)}
       </section>` : '';
     target.className = `rd-pane rd-focus is-${r}`;
     target.innerHTML = `
       <header class="rd-pane-head">
-        <div><h2>선택한 주제 · ${esc(t.name)}<span class="rd-focus-badge">${label}</span></h2><p>${definition ? `${esc(definition)} · ` : ''}칭찬 ${num(t.pos)}건 · 불만 ${num(t.neg)}건${t.neg && t.negative_recommended != null ? ` (불만을 쓴 리뷰 중 ${num(t.negative_recommended)}건은 게임을 추천)` : ''}</p></div>
+        <div><h2>${esc(t.name)}<span class="rd-focus-badge">${label}</span><small>${definition ? `${esc(definition)} · ` : ''}칭찬 ${num(t.pos)}건 · 불만 ${num(t.neg)}건</small></h2></div>
       </header>
       <div class="rd-focus-grid">
         ${when}
@@ -777,5 +781,5 @@ body { margin:0; background:#F2F4F6; font-family:system-ui,-apple-system,"Segoe 
     if (button) { const t = button.parentElement, open = !t.classList.contains('is-open'); t.classList.toggle('is-open', open); button.setAttribute('aria-expanded', String(open)); }
   });
 
-  return {render, refresh, report, reportHTML, icon, plain, cohorts: renderCohorts, foldNotes, openTopic};
+  return {render, refresh, report, reportHTML, icon, plain, cohorts: renderCohorts, foldNotes, openTopic, whenHTML};
 })();

@@ -169,8 +169,10 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
 .rd-focus { grid-column:1 / -1; }
 /* 선택한 주제는 제목 카드와 내용별 카드로 나눈다. 한 카드에 여러 내용을 넣지 않는다. */
 .rd-pane.rd-focus { display:grid; gap:16px; background:transparent; border:0; border-radius:0; }
-.rd-focus > .rd-pane-head, .rd-focus .rd-sec { background:var(--rd-surface); border:1px dashed var(--rd-card-line); border-radius:var(--rd-radius); }
-.rd-focus > .rd-pane-head { align-items:center; padding:20px var(--rd-pad); }
+.rd-focus .rd-sec { background:var(--rd-surface); border:1px dashed var(--rd-card-line); border-radius:var(--rd-radius); }
+.rd-focus > .rd-pane-head { align-items:center; padding:8px 4px 0; }   /* 제목은 카드가 아니라 한 줄 글자다 */
+.rd-focus > .rd-pane-head h2 { font-size:20px; }
+.rd-focus > .rd-pane-head h2 small { margin-left:12px; font-size:13px; font-weight:400; color:var(--rd-sub); }
 .rd-pane {
   display:flex; flex-direction:column; min-width:0;
   background:var(--rd-surface); border:1px dashed var(--rd-card-line); border-radius:var(--rd-radius);
@@ -301,6 +303,19 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
 .rd-sec h3 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:14px; font-size:16px; font-weight:600; color:var(--rd-ink); }
 .rd-sec h3 .rd-icon { color:var(--rd-sub); }
 .rd-sec h3 small { font-size:13px; font-weight:400; color:var(--rd-sub); }
+/* 언제 나오나: 구간마다 가로 막대 한 줄 + 한 문장 */
+.rd-when { display:grid; gap:10px; }
+.rd-when-row { display:grid; grid-template-columns:92px minmax(0,1fr) 150px; gap:12px; align-items:center; }
+.rd-when-label { font-size:14px; color:var(--rd-text); white-space:nowrap; }
+.rd-when-track { height:12px; border-radius:3px; background:var(--rd-soft); overflow:hidden; }
+.rd-when-track i { display:block; height:100%; border-radius:3px; background:var(--rd-neg-mute); }
+.rd-when-row.is-max .rd-when-track i { background:var(--rd-neg); }
+.rd-when-val { font-size:13px; line-height:1.35; color:var(--rd-sub); white-space:nowrap; }
+.rd-when-val b { display:block; font-size:14px; font-weight:500; color:var(--rd-text); }
+.rd-when-row.is-max .rd-when-val b, .rd-when-row.is-max .rd-when-label { font-weight:700; color:var(--rd-neg-ink); }
+.rd-when-val small { font-size:13px; }
+.rd-when-say { margin:14px 0 0; padding:10px 12px; border-radius:8px; background:var(--rd-soft); font-size:14px; line-height:1.5; color:var(--rd-text); }
+.rd-when-say b { font-weight:600; color:var(--rd-ink); }
 .rd-cols { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
 .rd-col { display:grid; grid-template-rows:auto 72px auto; gap:8px; justify-items:center; text-align:center; min-width:0; }
 .rd-col-val { font-size:13px; color:var(--rd-text); white-space:nowrap; font-variant-numeric:tabular-nums; }
