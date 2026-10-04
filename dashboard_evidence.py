@@ -220,7 +220,7 @@ def build_evidence(directory, app_id):
                        "sure": bool(neg_range) and (neg_range[0] > 50 or neg_range[1] < 50),
                        "negative_recommended": sum(is_positive(reviews[rid]) for rid in group["N"]),
                        "cells": cells,
-                       "examples": {s: [excerpt(reviews[rid], app_id) for rid in sorted_ids(group[s], reviews)[:4]]
+                       "examples": {s: [excerpt(reviews[rid], app_id) for rid in sorted_ids(group[s], reviews)[:8]]
                                     for s in ("P", "N")}})
     # 구간마다 불만으로 가장 많이 나온 주제 둘
     for index, cohort in enumerate(cohorts):

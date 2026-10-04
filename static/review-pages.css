@@ -23,10 +23,13 @@
 /* ---------- 분석 방법: 질문 네 개의 답 + 카드 세 장. 접지 않고 한 화면에 둔다 ---------- */
 .rp-how { margin-bottom:16px; }
 .rp-flow { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:36px; margin:0; padding:0; list-style:none; }
-.rp-flow li { position:relative; padding:14px 16px; border-radius:10px; background:var(--rp-soft); }
+.rp-flow li { position:relative; padding:16px 18px; border-radius:10px; background:var(--rp-soft); }
+.rp-flow .rp-who.rule { background:#fff; }
 .rp-flow li + li::before { content:"→"; position:absolute; left:-27px; top:50%; transform:translateY(-50%); font-size:18px; color:var(--rp-sub); }
 .rp-flow b { display:block; margin:8px 0 4px; font-size:16px; font-weight:600; color:var(--rp-ink); }
-.rp-flow p { margin:0; font-size:14px; line-height:1.55; color:var(--rp-text); }
+.rp-flow p { margin:0; font-size:14px; line-height:1.6; color:var(--rp-text); }
+.rp-bias-table { max-width:860px; }
+.rp-card > .rp-callout:first-of-type { font-size:15px; }
 .rp-how + .rp-card .rd-cross th small { display:inline; margin-left:6px; }
 
 /* ---------- 불만 분석: 왼쪽 주제 목록 + 오른쪽 고른 주제. 한 화면에 들어온다 ---------- */
@@ -42,24 +45,16 @@
 .rp-pitem { display:grid; grid-template-columns:84px minmax(0,1fr) 52px; gap:12px; align-items:center; padding:0 12px; border:0; border-radius:8px; background:transparent; font:inherit; color:inherit; text-align:left; }
 .rp-pitem:hover { background:var(--rp-soft); }
 .rp-pitem[aria-pressed="true"] { background:var(--rp-soft); }
-.rp-pitem b { font-size:14px; font-weight:600; color:var(--rp-ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rp-pitem b { font-size:15px; font-weight:600; color:var(--rp-ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .rp-ptrk i { display:block; height:12px; border-radius:3px; background:var(--rp-neg-mute); }
 .rp-pitem[aria-pressed="true"] .rp-ptrk i { background:var(--rp-neg); }
 .rp-pitem em { font-style:normal; font-size:13px; text-align:right; color:var(--rp-text); }
 .rp-poff { margin:0; padding:10px 12px; border-radius:8px; background:var(--rp-soft); font-size:13px; line-height:1.5; color:var(--rp-text); }
-.rp-pthree { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:36px; }   /* 사이에 화살표가 들어간다 */
-.rp-pthree > .rp-card { position:relative; }
-.rp-pthree > .rp-card + .rp-card::before { content:"→"; position:absolute; left:-27px; top:50%; transform:translateY(-50%); font-size:18px; color:var(--rp-sub); }
-.rp-pthree p, .rp-pthree li { margin:0; font-size:14px; line-height:1.55; color:var(--rp-ink); overflow-wrap:anywhere; }
-.rp-pthree ul { margin:0; padding:0 0 0 16px; }
-.rp-pthree li + li { margin-top:4px; }
-.rp-clamp { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-.rp-pthree .rp-card { min-height:178px; }
-.rp-pthree li span span { font-size:13px; color:var(--rp-sub); white-space:nowrap; }
 .rp-pstack .is-none { margin:0; font-size:14px; color:var(--rp-sub); }
 .rp-ptwo { display:grid; grid-template-columns:minmax(0,4fr) minmax(0,5fr); gap:16px; }
 .rp-ptwo > .rp-card { display:flex; flex-direction:column; }
-.rp-ptwo .rd-when { flex:1; align-content:space-around; }
+.rp-ptwo .rd-when { gap:14px; }
+.rp-ptwo .rd-when-track { height:14px; }
 .rp-ptwo .rp-card-head .rd-btn { flex:none; }
 .rp-ptwo blockquote { margin:0 0 6px; padding:10px 12px; border-radius:8px; background:var(--rp-soft); font-size:14px; line-height:1.6; color:var(--rp-text); overflow-wrap:anywhere; }
 .rp-ptwo blockquote span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }   /* 안쪽에서 자른다. 바깥에서 자르면 여백에 셋째 줄이 비친다 */
@@ -229,8 +224,9 @@
 /* ---------- 반응형 ---------- */
 @media (prefers-reduced-motion: no-preference) {
   .rp-pitem, .rp-ptrk i { transition:background-color .15s ease; }
+  .rp-flow li { animation:rd-rise .4s cubic-bezier(.2,.7,.2,1) both; }
+  .rp-flow li:nth-child(2) { animation-delay:.06s; } .rp-flow li:nth-child(3) { animation-delay:.12s; } .rp-flow li:nth-child(4) { animation-delay:.18s; } .rp-flow li:nth-child(5) { animation-delay:.24s; }
   .rp-pstack .rp-ptitle, .rp-pstack .rp-card > :not(.rp-card-head) { animation:rd-fade .22s ease both; }
-  .rp-pstack .rd-when-track i { transform-origin:left; animation:rd-grow-x .4s cubic-bezier(.2,.7,.2,1) both; }
 }
 
 @media (max-width:1180px) {
@@ -241,11 +237,11 @@
   .rp-side { position:static; }
 }
 @media (max-width:760px) {
-  .rp-pthree { gap:12px; }
-  .rp-pthree > .rp-card + .rp-card::before { display:none; }
+  .rd-flow { grid-template-columns:1fr; gap:30px; }
+  .rd-flow .rd-flow-box + .rd-flow-box::before { content:"↓"; left:50%; top:-25px; transform:translateX(-50%); }
   .rd-when-row { grid-template-columns:80px minmax(0,1fr); }
   .rd-when-val { grid-column:1 / -1; }
-  .rp-pthree, .rp-ptwo { grid-template-columns:1fr; }
+  .rp-ptwo { grid-template-columns:1fr; }
   .rp { --rp-pad:16px; }
   .rp-grid { gap:8px; }
   .rp-col { gap:8px; }

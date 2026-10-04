@@ -206,10 +206,10 @@ window.ReviewPages = (() => {
     const gap = themed.negative_rate - base.negative_rate, hours = themed.hours != null && base.hours != null ? themed.hours - base.hours : null;
     return `<section class="rp-card">
         ${cardHead('주제가 붙은 글은 전체와 얼마나 다른가', '주제별 숫자는 주제가 붙은 글에서만 나옵니다 · 색칠한 칸은 전체와 차이가 큰 값 · 플레이 시간과 글 길이는 가운데 값', 'scale')}
-        <table class="rd-cross"><thead><tr><td></td><th scope="col">비추천</th><th scope="col">플레이 시간</th><th scope="col">글 길이</th></tr></thead>
-          <tbody>${rows.map(r => `<tr><th scope="row">${esc(r.name)}<small>${num(r.n)}건</small></th>
-            ${cell(r, 'negative_rate', pct, () => 2)}${cell(r, 'hours', v => `${num(Math.round(v))}시간`, v => Math.max(5, v * .25))}${cell(r, 'length', v => `${num(v)}자`, v => Math.max(5, v * .5))}</tr>`).join('')}</tbody></table>
         <p class="rp-callout">주제 숫자가 나오는 <b>${esc(themed.name)} ${num(themed.n)}건</b>은 수집한 리뷰 전체보다 비추천이 <b>${Math.abs(gap).toFixed(1)}%p</b> ${hours == null ? (gap >= 0 ? '많습니다' : '적습니다') : `${gap >= 0 ? '많고' : '적고'}, 플레이 시간이 <b>${num(Math.abs(Math.round(hours)))}시간</b> ${hours >= 0 ? '깁니다' : '짧습니다'}`}.</p>
+        <div class="rp-bias-table">        <table class="rd-cross"><thead><tr><td></td><th scope="col">비추천</th><th scope="col">플레이 시간</th><th scope="col">글 길이</th></tr></thead>
+          <tbody>${rows.map(r => `<tr><th scope="row">${esc(r.name)}<small>${num(r.n)}건</small></th>
+            ${cell(r, 'negative_rate', pct, () => 2)}${cell(r, 'hours', v => `${num(Math.round(v))}시간`, v => Math.max(5, v * .25))}${cell(r, 'length', v => `${num(v)}자`, v => Math.max(5, v * .5))}</tr>`).join('')}</tbody></table></div>
       </section>`;
   }
 
@@ -258,31 +258,16 @@ window.ReviewPages = (() => {
   // AI 요약(data.actions)이 있으면 그 문장을, 없으면 리뷰마다 적어 둔 불만 메모를 보여 준다. 바라는 것은 리뷰에 적힌 요청 그대로다.
   function drawProblem(data, t) {
     const ev = data.evidence, deep = ev.deep, plain = x => window.ReviewDashboard?.plain?.(x) ?? x;
-    const act = data.actions?.find(x => x.theme === t.name) || {};
-    const notes = deep.notes?.[t.name] || [];
-    const wants = (deep.wants || []).filter(w => w.theme === t.name).slice(0, 2);
-    // 주제를 바꿔도 화면 높이가 달라지지 않도록 항목마다 두 줄까지만 보여 준다. 전체 문장은 마우스를 올리면 보인다.
-    const list = items => `<ul>${items.map(x => `<li><span class="rp-clamp" title="${x.replace(/<[^>]+>/g, '')}">${x}</span></li>`).join('')}</ul>`;
-    const whys = notes.filter(n => n.why).slice(0, 2);
     const cells = (t.cells || []).map((c, i) => ({...c, label: ev.cohorts?.[i]?.label || ''}));
     const quotes = (t.examples?.N || []).slice(0, 3);
-    const summed = Boolean(act.prob || act.why);
     const card = (cls, title, sub, body, note, extra = '') => `<section class="rp-card ${cls}">${cardHead(title, sub, '', extra)}${body}${note ? `<p class="rp-note">${note}</p>` : ''}</section>`;
     // 읽는 순서: 무슨 일인가 → 왜 그런가 → 무엇을 바라나, 그다음 언제 나오나와 실제 리뷰
     document.getElementById('rpProblem').innerHTML = `
-      <h2 class="rp-ptitle">${esc(t.name)}<small>불만 ${num(t.neg)}건${t.negative_recommended != null ? ` · 그중 ${num(t.negative_recommended)}건은 그래도 게임을 추천했습니다` : ''}</small></h2>
-      <div class="rp-pthree">
-        ${card('', '무슨 일인가', summed ? 'AI가 요약한 문장' : '리뷰마다 AI가 적어 둔 메모',
-          act.prob ? `<p>${esc(act.prob)}</p>` : notes.length ? list(notes.slice(0, 3).map(n => esc(n.prob))) : '<p class="is-none">불만 메모가 없습니다.</p>',
-          summed ? 'AI가 이 주제의 불만 리뷰를 요약한 문장입니다. 원문으로 확인해 주십시오.' : 'AI가 리뷰마다 적어 둔 메모이고, 도움됨이 많은 리뷰부터 보여 줍니다. AI가 주제를 잘못 붙였을 수 있으니 원문으로 확인해 주십시오.')}
-        ${card('', '왜 그런가', summed && act.why ? 'AI가 요약한 문장' : '리뷰에 적힌 문장',
-          act.why ? `<p>${esc(act.why)}</p>` : whys.length ? list(whys.map(n => `“${esc(n.why)}”`)) : '<p class="is-none">이유를 적은 리뷰가 없습니다.</p>')}
-        ${card('', '무엇을 바라나', '리뷰에 적힌 요청 그대로',
-          wants.length ? list(wants.map(w => `“${esc(w.text)}” <span>${w.count > 1 ? `${num(w.count)}건 · ` : ''}도움됨 ${num(w.votes)}</span>`)) : '<p class="is-none">구체적으로 요청한 리뷰가 없습니다.</p>')}
-      </div>
+      <h2 class="rp-ptitle">${esc(t.name)}<small>이 불만을 쓴 리뷰 ${num(t.neg)}건</small></h2>
+      ${window.ReviewDashboard?.pwrHTML?.(t.name, 'is-cards') || ''}
       <div class="rp-ptwo">
-        ${card('', '언제 나오나', '플레이 시간별로, 리뷰 100건 중 이 불만을 말한 건수', window.ReviewDashboard?.whenHTML?.(cells) || '',
-          '그 구간의 AI 분석 리뷰 중 이 주제를 불만으로 말한 리뷰의 비율입니다. 리뷰가 30건이 안 되는 구간은 표시하지 않습니다.')}
+        ${card('', '누가 썼나', '', window.ReviewDashboard?.whenHTML?.(cells, t.negative_recommended != null ? {up: t.negative_recommended, down: t.neg - t.negative_recommended} : null) || '',
+          '막대는 이 불만을 쓴 리뷰 수입니다. 구간마다 리뷰 수가 달라서, 그 구간 리뷰 중 몇 %인지를 옆에 작게 적었습니다. 문제와 이유는 AI가 쓴 문장이고 요청은 리뷰에 적힌 문장입니다.')}
         ${card('', '실제 리뷰', '이 불만이 붙은 리뷰',
           quotes.length ? quotes.map(q => `<blockquote><span>${esc(plain(q.content))}${q.truncated ? '…' : ''}</span></blockquote><p class="rp-pwho">${q.recommended ? '게임 추천' : '게임 비추천'}${q.hours == null ? '' : ` · ${num(Math.round(q.hours))}시간 플레이`}${q.helpful ? ` · 도움됨 ${num(q.helpful)}` : ''}</p>`).join('') : '<p class="is-none">보여 줄 리뷰가 없습니다.</p>',
           '', `<button type="button" class="rd-btn" data-reviews="${esc(t.name)}">${num(t.neg)}건 모두 보기</button>`)}

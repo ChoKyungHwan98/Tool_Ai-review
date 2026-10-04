@@ -164,7 +164,7 @@ window.ReviewDashboard = (() => {
           </div>
         </section>
         <section class="rd-pane rd-pane-map" aria-labelledby="rdMapTitle">
-          <header class="rd-pane-head"><div><h2 id="rdMapTitle">IPA 매트릭스</h2><p>오른쪽일수록 많이 언급 · 위일수록 불만 비율이 높음</p></div>${icon('matrix')}</header>
+          <header class="rd-pane-head"><div><h2 id="rdMapTitle">주제 지도</h2><p>오른쪽일수록 많이 언급 · 위일수록 불만 비율이 높음</p></div>${icon('matrix')}</header>
           <div class="rd-pane-body" id="rdMapChart"></div>
           <p class="rd-note">원을 누르면 아래 근거가 그 주제로 바뀝니다. 세로 점선은 언급 수 중앙값, 가로 점선은 불만 50%입니다. 원 크기도 언급 수입니다.</p>
         </section>
@@ -518,15 +518,39 @@ window.ReviewDashboard = (() => {
   }
 
   // 선택 주제: 칭찬/불만 비율, 불만이 나오는 플레이 구간, AI 요약, 실제 리뷰 한 줄
-  // '언제 나오나': 플레이 시간 구간마다 리뷰 100건 중 몇 건이 이 불만을 말했는지. 가로 막대 + 한 문장.
-  function whenHTML(cells) {
-    const ok = cells.filter(c => c.denominator >= 30 && c.rate != null), top = Math.max(0, ...ok.map(c => c.rate));
-    const peak = top ? ok.find(c => c.rate === top) : null;
-    return `<div class="rd-when" role="img" aria-label="${cells.map(c => `${c.label} ${c.denominator >= 30 ? `100건 중 ${c.rate}건` : '리뷰가 적어 표시하지 않음'}`).join(', ')}">
-        ${cells.map(c => { const small = c.denominator < 30;
-          return `<div class="rd-when-row ${!small && peak === c && c.count >= 5 ? 'is-max' : ''}${small ? ' is-small' : ''}"><span class="rd-when-label">${esc(c.label)}</span><span class="rd-when-track"><i style="width:${small || !top ? 0 : Math.max(2, c.rate / top * 100)}%"></i></span><span class="rd-when-val">${small ? '리뷰가 적음' : `<b>100건 중 ${num(c.rate)}건</b>`}<small>${num(c.denominator)}건 중 ${num(c.count)}건</small></span></div>`; }).join('')}
-      </div>${!peak ? '' : peak.count >= 5 ? `<p class="rd-when-say"><b>${esc(peak.label)}</b> 플레이한 사람이 이 불만을 가장 자주 말했습니다.</p>`
-        : `<p class="rd-when-say">가장 높은 구간도 ${num(peak.count)}건뿐이어서, 어느 구간에서 더 많이 나온다고 말하기는 어렵습니다.</p>`}`;   // 리뷰 두세 건으로 "가장 자주"라고 하지 않는다
+  // 이 불만을 쓴 리뷰가 플레이 시간 구간마다 몇 건인지. 결론 문장을 먼저 쓰고 막대는 건수 그대로 그린다.
+  // 구간마다 리뷰 수가 다르므로, 그 구간 리뷰 중 몇 %인지는 작은 글씨로 곁들인다.
+  function whenHTML(cells, votes) {
+    const total = cells.reduce((n, c) => n + (c.count || 0), 0), most = Math.max(0, ...cells.map(c => c.count || 0));
+    const peak = cells.find(c => c.count === most);
+    const say = !total ? '' : total < 5 ? `이 불만을 쓴 리뷰가 ${num(total)}건뿐이어서 어느 구간에 몰렸다고 말하기 어렵습니다.`
+      : `${num(total)}건 중 <b>${num(peak.count)}건</b>은 <b>${esc(peak.label)}</b> 플레이한 사람이 썼습니다.`;
+    const up = votes?.up ?? null, down = votes?.down ?? null;
+    const split = up == null || !(up + down) ? '' : `<h4 class="rd-who-h">게임을 추천했나</h4>
+      <div class="rd-split" role="img" aria-label="추천 ${up}건, 비추천 ${down}건"><i class="up" style="flex:${up} 1 0"></i><i class="down" style="flex:${down} 1 0"></i></div>
+      <p class="rd-split-key"><span class="up">추천 <b>${num(up)}건</b></span><span class="down">비추천 <b>${num(down)}건</b></span></p>`;
+    return `${say ? `<p class="rd-when-say">${say}</p>` : ''}
+      ${split ? '<h4 class="rd-who-h">얼마나 플레이했나</h4>' : ''}
+      <div class="rd-when" role="img" aria-label="${cells.map(c => `${c.label} ${c.count}건`).join(', ')}">
+        ${cells.map(c => `<div class="rd-when-row ${total >= 5 && c === peak ? 'is-max' : ''}"><span class="rd-when-label">${esc(c.label)}</span><span class="rd-when-track"><i style="width:${most ? c.count / most * 100 : 0}%"></i></span><span class="rd-when-val"><b>${num(c.count)}건</b><small>${c.denominator ? `이 구간 리뷰의 ${pct(c.rate)}` : ''}</small></span></div>`).join('')}
+      </div>${split}`;
+  }
+
+  // 한 주제의 불만을 읽는 순서대로: 문제 → 이유 → 요청. 문제와 이유는 AI 요약(없으면 리뷰별 메모), 요청은 리뷰에 적힌 문장 그대로.
+  function pwrHTML(theme, layout = '') {
+    const act = data.actions?.find(row => row.theme === theme) || {}, deep = evidence.deep || {};
+    const notes = deep.notes?.[theme] || [], wants = (deep.wants || []).filter(w => w.theme === theme).slice(0, 2);
+    const lines = list => list.map(x => `<span>${x}</span>`).join('');
+    const prob = act.prob ? esc(act.prob) : lines(notes.slice(0, 2).map(n => esc(n.prob)));
+    const why = act.why ? esc(act.why) : lines(notes.filter(n => n.why).slice(0, 2).map(n => `“${esc(n.why)}”`));
+    const ask = lines(wants.map(w => `“${esc(w.text)}”`));
+    const summed = Boolean(act.prob || act.why);
+    const box = (name, source, body, none) => `<div class="rd-flow-box"><b>${name}</b><small>${source}</small>${body ? `<p>${body}</p>` : `<p class="is-none">${none}</p>`}</div>`;
+    return `<div class="rd-flow ${layout}">
+        ${box('문제', summed ? 'AI 요약' : 'AI 메모', prob, '적힌 내용이 없습니다.')}
+        ${box('이유', summed && act.why ? 'AI 요약' : '리뷰 문장', why, '이유를 적은 리뷰가 없습니다.')}
+        ${box('요청', '리뷰 문장 그대로', ask, '구체적으로 요청한 리뷰가 없습니다.')}
+      </div>`;
   }
 
   function renderDetail() {
@@ -535,13 +559,15 @@ window.ReviewDashboard = (() => {
     const r = role(t);
     const label = t.neg > t.pos ? '불만이 더 많음' : '칭찬이 더 많음';
     const definition = data.themes?.find(row => row.name === t.name)?.desc;
-    const action = data.actions?.find(row => row.theme === t.name);
     const lead = t.neg > t.pos ? 'N' : 'P';
     const quote = t.examples?.[lead]?.[0] || t.examples?.[lead === 'N' ? 'P' : 'N']?.[0];
     const cells = (t.cells || []).map((c, i) => ({...c, label: evidence.cohorts[i]?.label || ''}));
-    const when = t.neg && cells.length ? `<section class="rd-sec">
-        <h3>${icon('clock')}언제 나오나 <small>플레이 시간별로, 리뷰 100건 중 이 불만을 말한 건수</small></h3>
-        ${whenHTML(cells)}
+    // 불만이 다섯 건이 안 되는 주제는 불만 카드를 그리지 않는다. 한두 건으로 막대와 요약을 만들면 있는 것처럼 보인다.
+    const enoughNeg = t.neg >= 5;
+    const more = (t.examples?.[lead] || []).slice(1, 3);   // 대표 리뷰는 세 건까지 보여 준다
+    const when = enoughNeg && cells.length ? `<section class="rd-sec">
+        <h3>${icon('clock')}누가 썼나</h3>
+        ${whenHTML(cells, t.negative_recommended != null ? {up: t.negative_recommended, down: t.neg - t.negative_recommended} : null)}
       </section>` : '';
     target.className = `rd-pane rd-focus is-${r}`;
     target.innerHTML = `
@@ -550,9 +576,10 @@ window.ReviewDashboard = (() => {
       </header>
       <div class="rd-focus-grid">
         ${when}
-        ${action?.prob || action?.why || action?.fix?.length ? `<section class="rd-sec rd-why"><h3>${icon('bulb')}AI가 요약한 내용</h3>${action.prob ? `<p><b>무슨 일인가</b>${esc(action.prob)}</p>` : ''}${action.why ? `<p><b>리뷰가 말하는 원인</b>${esc(action.why)}</p>` : ''}${action.fix?.length ? `<p><b>리뷰에서 나온 제안</b></p><ul>${action.fix.map(f => `<li>${esc(f)}</li>`).join('')}</ul>` : ''}<p class="rd-note">원문으로 확인한 뒤 판단하세요.</p></section>` : ''}
+        ${enoughNeg ? `<section class="rd-sec"><h3>${icon('bulb')}불만 한눈에</h3>${pwrHTML(t.name, 'is-col')}<p class="rd-note">문제와 이유는 AI가 쓴 문장이고 요청은 리뷰에 적힌 문장입니다. AI가 틀렸을 수 있으니 리뷰 원문으로 확인해 주십시오.</p></section>` : ''}
         <section class="rd-sec">
-          ${quote ? `<h3>${icon('review')}대표 리뷰 <small>${quote.recommended ? '게임 추천' : '게임 비추천'}${quote.hours == null ? '' : ` · ${num(Math.round(quote.hours))}시간 플레이`}</small></h3><blockquote class="rd-quote">${esc(plain(quote.content))}${quote.truncated ? '…' : ''}</blockquote>` : `<h3>${icon('review')}리뷰 원문</h3>`}
+          ${quote ? `<h3>${icon('review')}대표 리뷰 <small>${quote.recommended ? '게임 추천' : '게임 비추천'}${quote.hours == null ? '' : ` · ${num(Math.round(quote.hours))}시간 플레이`}</small></h3><blockquote class="rd-quote">${esc(plain(quote.content))}${quote.truncated ? '…' : ''}</blockquote>${more.map(q => `<blockquote class="rd-quote">${esc(plain(q.content))}${q.truncated ? '…' : ''}</blockquote>`).join('')}` : `<h3>${icon('review')}리뷰 원문</h3>`}
+          ${!enoughNeg && t.neg ? `<p class="rd-quote-less">불만은 ${num(t.neg)}건뿐이어서 따로 정리하지 않았습니다.</p>` : ''}
           <div class="rd-focus-actions">
             ${t.neg ? `<button class="rd-btn ${lead === 'N' ? 'primary' : ''}" data-action="evidence" data-sentiment="N">불만 리뷰 ${num(t.neg)}건</button>` : ''}
             ${t.pos ? `<button class="rd-btn ${lead === 'P' ? 'primary' : ''}" data-action="evidence" data-sentiment="P">칭찬 리뷰 ${num(t.pos)}건</button>` : ''}
@@ -592,10 +619,16 @@ window.ReviewDashboard = (() => {
     if (!rows.length) { target.innerHTML = '<div class="rd-empty">칭찬으로 분류된 주제가 없습니다.</div>'; return; }
     const max = rows[0].pos;
     // 같은 글이 두 주제에 되풀이되지 않게, 아직 쓰지 않은 글을 고른다
-    const used = new Set(), pick = t => { const ex = (t.examples?.P || []).find(x => !used.has(x.id)); if (ex) used.add(ex.id); return ex ? plain(ex.content) : ''; };
+    // 인용문은 짧은 것부터 고른다. 긴 리뷰는 여러 주제를 한꺼번에 말해서, 한 줄로 자르면 그 주제와 상관없는 앞부분만 보인다.
+    const used = new Set(), pick = t => {
+      const ex = [...(t.examples?.P || [])].filter(x => !used.has(x.id)).sort((a, b) => plain(a.content).length - plain(b.content).length)[0];
+      if (ex) used.add(ex.id);
+      return ex ? plain(ex.content) : '';
+    };
+    const meaning = name => data.themes?.find(row => row.name === name)?.desc || '';
     target.innerHTML = `<div class="rd-praises">${rows.map((t, i) => { const quote = pick(t);
       return `<button type="button" class="rd-praise ${i ? '' : 'is-top'}" data-action="open-topic" data-theme="${esc(t.name)}" aria-label="${esc(t.name)}: 칭찬 ${t.pos}건">
-        <span class="rd-praise-name">${esc(t.name)}</span>
+        <span class="rd-praise-name"><b>${esc(t.name)}</b><small>${esc(meaning(t.name))}</small></span>
         <span class="rd-praise-track"><i style="width:${t.pos / max * 100}%"></i></span>
         <span class="rd-praise-count">${num(t.pos)}건</span>
         ${quote ? `<span class="rd-praise-quote">“${esc(quote)}”</span>` : ''}
@@ -781,5 +814,5 @@ body { margin:0; background:#F2F4F6; font-family:system-ui,-apple-system,"Segoe 
     if (button) { const t = button.parentElement, open = !t.classList.contains('is-open'); t.classList.toggle('is-open', open); button.setAttribute('aria-expanded', String(open)); }
   });
 
-  return {render, refresh, report, reportHTML, icon, plain, cohorts: renderCohorts, foldNotes, openTopic, whenHTML};
+  return {render, refresh, report, reportHTML, icon, plain, cohorts: renderCohorts, foldNotes, openTopic, whenHTML, pwrHTML};
 })();
