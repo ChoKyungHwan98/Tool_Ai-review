@@ -26,7 +26,7 @@ def margin_of_error(n, population, p=0.5, z=Z_95):
 
 
 def plan_sample_size(total, negative, target_error_pct, min_neg, custom=None):
-    """수집할 건수를 정한다. 목표 오차와 비추천 최소 건수 중 더 많이 필요한 쪽을 따른다.
+    """수집할 건수를 정한다. 목표 오차와 비추천 목표 건수(기대값) 중 더 많이 필요한 쪽을 따른다.
 
     custom이 있으면 그 건수를 그대로 쓴다. 추천·비추천 건수는 전체 비율대로 나눈다.
     """

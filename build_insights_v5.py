@@ -59,10 +59,11 @@ def build():
     for name, group in members.items():
         ids = group["P"] | group["N"]
         others = themed - ids
+        with_theme = sum(up[rid] for rid in ids) / len(ids) if ids else themed_rate
         without = sum(up[rid] for rid in others) / len(others) if others else themed_rate
         rows.append({"name": name, "desc": desc.get(name, ""), "mentions": len(ids),
                      "pos": len(group["P"]), "neg": len(group["N"]),
-                     "impact": round((themed_rate - without) * 100, 2)})
+                     "impact": round((with_theme - without) * 100, 2)})   # 그 주제가 있는 글 − 없는 글
     rows.sort(key=lambda t: (-t["mentions"], t["name"]))
     ranked = [t for t in rows if t["mentions"] >= MIN_THEME]
     lifts = sorted([t for t in ranked if t["pos"] > t["neg"] * 2], key=lambda t: -t["pos"])[:3]

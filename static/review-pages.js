@@ -189,7 +189,7 @@ window.ReviewPages = (() => {
           standCalls ? `${esc(short(u.model))} 대신 ${esc(short(stand[0][0]))} · ${num(calls)}번 중 ${num(standCalls)}번` : `${esc(short(u.model))} · ${num(calls)}번`, 'div', `title="${esc(u.model)}"`, standCalls ? 'is-neg' : '') : ''}
       </div>
       <section class="rp-card rp-how">
-        ${cardHead('어떻게 분석했나', '왼쪽에서 오른쪽 순서로 진행합니다. 색 표시는 그 일을 누가 했는지입니다', '')}
+        ${cardHead('어떻게 분석했나', '순서대로 진행합니다. 색 표시는 그 일을 누가 했는지입니다', '')}
         <ol class="rp-flow">${steps.map(([name, who, text]) => `<li><span class="rp-who ${who === 'AI' ? 'ai' : 'rule'}">${who}</span><b>${name}</b><p>${text}</p></li>`).join('')}</ol>
       </section>
       ${biasHTML(data?.evidence?.bias)}`;

@@ -3,7 +3,7 @@
 절차:
 1. Steam query_summary로 한국어 모집단 N, 추천/비추천 비율 확인
 2. Cochran 공식으로 목표 오차한계에 맞는 최소 표본 크기 n 계산
-3. 부정 리뷰가 최소 MIN_NEG건 이상이 되도록 n을 조정
+3. 부정 리뷰가 약 MIN_NEG건(기대값) 들어오도록 n을 조정. 무작위로 뽑으므로 실제 건수는 조금 다를 수 있다
 4. 최신순·공감순이면 모집단 추천 비율에 맞춰 추천/비추천을 할당 수집한다.
    이 방식은 무작위 추출이나 전체 기간 대표성을 보장하지 않는다.
 5. 하나의 reviews.csv로 저장
@@ -75,12 +75,12 @@ def fetch_population():
 # ─── 2단계: 표본 크기 계산 ─────────────────────────────────────────────
 
 def decide_sample_size(pop):
-    """지금 설정(목표 오차 · 비추천 최소 건수 · 직접 지정)으로 수집할 건수를 정한다. 식은 sampling.py에 있다."""
+    """지금 설정(목표 오차 · 비추천 목표 건수 · 직접 지정)으로 수집할 건수를 정한다. 식은 sampling.py에 있다."""
     custom = getattr(cfg, "CUSTOM_SAMPLE_SIZE", None)
     plan = sampling.plan_sample_size(pop["total"], pop["negative"], get_target_error(), get_min_neg(),
                                      custom if custom and custom > 0 else None)
     reason = (f"직접 지정한 {plan['n_total']}건" if custom and custom > 0
-              else f"오차 ±{get_target_error()}%에 {plan['n_by_error']}건, 비추천 최소 {get_min_neg()}건에 {plan['n_for_neg']}건 → {plan['n_total']}건")
+              else f"오차 ±{get_target_error()}%에 {plan['n_by_error']}건, 비추천 약 {get_min_neg()}건(기대값)에 {plan['n_for_neg']}건 → {plan['n_total']}건")
     return {"n_total": plan["n_total"], "n_pos": plan["n_pos"], "n_neg": plan["n_neg"], "reason": reason}
 
 # ─── 3단계: 수집 ──────────────────────────────────────────────────────
