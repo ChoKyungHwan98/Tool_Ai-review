@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 from collections import Counter, defaultdict
 from datetime import datetime
 
@@ -81,18 +82,24 @@ def build():
                              "rate": round(sum(up[rid] for rid in group) / len(group) * 100, 1)})
 
     # ── 할 일 재료: 주제별 불만 메모 ────────────────────────────────
-    parts_by_theme = defaultdict(lambda: {"prob": [], "why": [], "fix": []})
+    parts_by_theme = defaultdict(lambda: {"prob": [], "why": [], "fix": [], "votes": Counter()})
     for c in complaints:
+        row = reviews.get(str(c.get("id")))
         for p in c.get("p") or []:
             if not isinstance(p, dict) or not p.get("t"):
                 continue
+            theme = analysis_design.resolve(p["t"], alias)
             for k in ("prob", "why", "fix"):
                 v = str(p.get(k) or "").strip()
-                if v and (k != "fix" or evidence.is_request(v)):
-                    parts_by_theme[analysis_design.resolve(p["t"], alias)][k].append(v)
+                if v and (k != "fix" or evidence.is_request(v, theme)):
+                    parts_by_theme[theme][k].append(v)
+                    if k == "fix" and row:
+                        parts_by_theme[theme]["votes"][v] += evidence.votes(row)   # 그 요청을 쓴 리뷰가 받은 도움됨
 
     pop_rate = (design.get("population") or {}).get("pos_rate")
-    return {"themes": rows, "lifts": lifts, "drags": drags, "fun": fun, "playtime": playtime,
+    # 불만 분석 화면은 불만이 많은 주제를 차례로 보여 준다. 그 주제마다 문제·원인을 요약한다.
+    complained = sorted([t for t in ranked if t["neg"] >= MIN_THEME], key=lambda t: (-t["neg"], t["name"]))[:8]
+    return {"themes": rows, "lifts": lifts, "drags": drags, "complained": complained, "fun": fun, "playtime": playtime,
             "rates": {"steam": round(pop_rate * 100, 1) if pop_rate else None}}, parts_by_theme
 
 # ── 요약과 할 일: AI 한 번 호출. 실패하면 규칙으로 만든다 ──────────────
@@ -104,18 +111,17 @@ USER_D = """게임: {game}
 분석 결과:
 {facts}
 
-주제별 불만 조각 (prob=문제, why=원인, fix=유저 제안):
+주제별 불만 조각 (prob=문제, why=원인):
 {parts}
 
 JSON 객체 하나로 답하세요.
-{{"summary":"","actions":[{{"t":"주제","prob":"","why":"","fix":[]}}]}}
+{{"summary":"","actions":[{{"t":"주제 이름","prob":"","why":""}}]}}
 - summary: 기획자가 읽을 한 문단, 180자 이내. 잘하는 점과 아쉬운 점을 함께. 숫자는 꼭 필요한 것 1~2개만.
 - 모든 비율과 차이는 수집한 리뷰 안의 관찰값입니다. 전체 유저를 대표한다거나 그 주제 때문에 추천률이 바뀐다고 쓰지 마세요.
 - actions: 위 불만 주제 순서 그대로. prob는 불만 조각을 종합한 문제 한 줄, 40자 이내.
   "언급 N건" 같은 통계 문장은 쓰지 말고 유저가 겪는 문제를 쓰세요. 조각이 없으면 "".
   why는 문제가 생기는 이유만 쓰고 prob의 말을 되풀이하지 마세요. 조각에 근거가 없으면 "".
-  fix는 조각의 fix 중 구체적인 요청만 0~2개 골라 25자 이내로 다듬으세요.
-  "버그 고쳐주세요"처럼 막연한 말은 빼고, 조각에 없는 해결책은 절대 만들지 마세요."""
+  해결책이나 제안은 쓰지 마세요. 유저의 요청은 리뷰에 적힌 문장을 따로 보여 줍니다."""
 
 
 def summary_prompt(game, result, parts_by_theme):
@@ -127,9 +133,9 @@ def summary_prompt(game, result, parts_by_theme):
         "스팀 추천률": result["rates"]["steam"],
     }
     # 같은 문장은 한 번만, 종류별로 몇 개만 보낸다. 요약에 필요한 것은 대표 사례이지 전체 목록이 아니다.
-    caps = {"prob": 12, "why": 8, "fix": 8}
-    parts = {t["name"]: {k: list(dict.fromkeys(v))[:caps.get(k, 8)] for k, v in parts_by_theme.get(t["name"], {}).items()}
-             for t in result["drags"]}
+    caps = {"prob": 12, "why": 8}
+    parts = {t["name"]: {k: list(dict.fromkeys(v))[:caps[k]] for k, v in parts_by_theme.get(t["name"], {}).items() if k in caps}
+             for t in result.get("complained", result["drags"])}
     return USER_D.format(
         game=game,
         facts=json.dumps(facts, ensure_ascii=False),
@@ -140,8 +146,9 @@ def summary_prompt(game, result, parts_by_theme):
 def ask_summary(game, result, parts_by_theme, prompt=None):
     body = {
         **limits.model_fields(),
+        **limits.thinking_fields(),
         "temperature": 0.2,
-        "max_tokens": limits.answer_room(900),
+        "max_tokens": limits.answer_room(1600),
         "messages": [{"role": "system", "content": SYSTEM_D},
                      {"role": "user", "content": prompt if prompt is not None else summary_prompt(game, result, parts_by_theme)}],
     }
@@ -212,7 +219,12 @@ def main():
             answer = cached["answer"]
             result["summary_cached"] = True
         elif result["lifts"] or result["drags"]:
-            answer, usage = ask_summary(game, result, parts_by_theme, prompt)
+            try:
+                answer, usage = ask_summary(game, result, parts_by_theme, prompt)
+            except Exception as first:   # 한 번 거절당했다고 요약을 규칙 문장으로 바꾸지 않는다. 한 번 더 묻는다.
+                print(f"  요약 생성 재시도: {str(first)[:120]}")
+                time.sleep(20 if limits.is_free() else 3)
+                answer, usage = ask_summary(game, result, parts_by_theme, prompt)
             record_usage(usage)
             with open(cache_path, "w", encoding="utf-8") as f:
                 json.dump({"key": cache_key, "answer": answer}, f, ensure_ascii=False)
@@ -222,22 +234,33 @@ def main():
             result["summary_source"] = "rule"
         result["summary"] = str(answer.get("summary", "")).strip() or rule_summary(result)
         result.setdefault("summary_source", "ai")
-        for a in answer.get("actions") or []:
-            if isinstance(a, dict) and a.get("t"):
-                actions_ai[a["t"]] = a
+        result["summary"] = evidence.korean_only(result["summary"])
+        drag_names = [t["name"] for t in result.get("complained", result["drags"])]
+        given = [a for a in answer.get("actions") or [] if isinstance(a, dict)]
+        # 주제 이름 칸에 예시("주제")를 그대로 적는 모델이 있다. 이름이 맞지 않으면 물어본 순서로 짝짓는다.
+        by_order = len(given) == len(drag_names) and not all(a.get("t") in drag_names for a in given)
+        for i, a in enumerate(given):
+            name = drag_names[i] if by_order else a.get("t")
+            if name:
+                actions_ai[name] = {"prob": evidence.korean_only(a.get("prob")), "why": evidence.korean_only(a.get("why"))}
     except Exception as e:
         print(f"  요약 생성 실패, 규칙으로 대체: {str(e)[:120]}")
         result["summary"] = rule_summary(result)
         result["summary_source"] = "rule"
 
     actions = []
-    for t in result["drags"]:
+    for t in result.get("complained", result["drags"]):
         a = actions_ai.get(t["name"], {})
-        raw = parts_by_theme.get(t["name"], {})
+        # AI가 답하지 못했으면 비워 둔다. 불만 조각 하나를 골라 "AI가 요약한 내용"으로 보이면
+        # 농담 한 줄("시간이 삭제됨")이 그 주제의 문제로 적힌다.
+        # 제안은 AI가 쓰지 않는다(리뷰에 없는 "서버 개선", "팰 종류 다양화"를 지어냈다). 리뷰 메모에 적힌 요청 중 여러 번 나온 것부터 고른다.
+        memo = parts_by_theme.get(t["name"], {})
+        asked, liked = Counter(memo.get("fix") or []), memo.get("votes") or {}
+        best = sorted(asked, key=lambda text: (-asked[text], -liked.get(text, 0)))[:2]   # 여러 번 나온 것, 그다음 도움됨이 많은 리뷰의 것
         actions.append({"theme": t["name"],
-                        "prob": a.get("prob") or (raw.get("prob") or [""])[0],
+                        "prob": a.get("prob") or "",
                         "why": a.get("why") or "",
-                        "fix": [str(x)[:40] for x in (a.get("fix") or [])][:2]})
+                        "fix": [text[:40] for text in best]})
 
     # 저장하는 것은 화면이 읽는 것뿐이다. 건수와 비율은 화면을 열 때 dashboard_evidence가 다시 센다.
     saved = {"generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),

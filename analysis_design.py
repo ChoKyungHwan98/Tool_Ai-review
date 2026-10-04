@@ -100,7 +100,10 @@ def design_log(sample_design, counts, usage, n_ai_topics, merges, themes, game="
     if counts.get("collected") is not None:
         how_much.append(f"{counts['collected']:,}건 수집")
     rows.append({"step": "얼마나", "who": "사람", "text": " → ".join(how_much) or "기록 없음",
-                 "details": ["±값은 몇 건을 모을지 정할 때 쓴 기준이다. 최신순으로 모은 리뷰라 결과의 정확도나 신뢰구간을 뜻하지 않는다"] if planned and target else []})
+                 # 무작위로 끝까지 훑어 뽑았을 때만 ±값이 오차범위다. 그 판정은 아래 '표본 오차의 조건' 카드가 한다.
+                 "details": ([] if params.get("sort") == "random" else
+                             [f"±값은 몇 건을 모을지 정할 때 쓴 기준입니다. {'공감순' if params.get('sort') == 'helpful' else '최신순'}으로 모은 리뷰여서 결과의 오차범위를 뜻하지 않습니다."])
+                 if planned and target else []})
     if (usage or {}).get("model"):
         rows.append({"step": "분석 모델", "who": "사람", "text": usage["model"]})
     if counts.get("collected") is not None and counts.get("analyzed") is not None:

@@ -474,7 +474,7 @@ footer { display: none !important; }
 .toast.show { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
 /* ============ 작업 화면 공통 ============ */
 :root { --studio-ink:#191F28; --studio-canvas:#F2F4F6; --studio-line:#E5E8EB; --studio-accent:#1B64DA; --studio-sidebar-width:260px; }
-.main-wrap { scrollbar-gutter:auto; scrollbar-width:thin; scrollbar-color:#c7ccd5 transparent; }
+.main-wrap { scrollbar-gutter:stable; scrollbar-width:thin;   /* 스크롤바가 생기는 화면과 없는 화면의 본문 위치가 같아야 한다 */ scrollbar-color:#c7ccd5 transparent; }
 .main-wrap::-webkit-scrollbar { width:10px; }
 .main-wrap::-webkit-scrollbar-track { background:transparent; margin:10px 3px; }
 .main-wrap::-webkit-scrollbar-thumb { background:#c7ccd5; border:3px solid transparent; background-clip:padding-box; border-radius:999px; }
@@ -772,11 +772,11 @@ body.no-analysis #ovBody { display: none; }
   .run-seg button { font-size:13px; padding:10px 4px; }
 }
 </style>
-<link rel="stylesheet" href="/static/review-dashboard.css?v=20261004-run14">
+<link rel="stylesheet" href="/static/review-dashboard.css?v=20261005-run34">
 <script src="/static/vendor/apexcharts.min.js?v=3.54.1"></script>
-<script src="/static/review-dashboard.js?v=20261004-run14"></script>
-<link rel="stylesheet" href="/static/review-pages.css?v=20261004-run14">
-<script src="/static/review-pages.js?v=20261004-run14"></script>
+<script src="/static/review-dashboard.js?v=20261005-run34"></script>
+<link rel="stylesheet" href="/static/review-pages.css?v=20261005-run34">
+<script src="/static/review-pages.js?v=20261005-run34"></script>
 <style>
 /* 공용 글꼴. 설치된 Pretendard가 있으면 그걸 쓰고, 없으면 스튜디오에 넣어 둔 파일을 쓴다(SIL OFL 1.1). */
 @font-face {
@@ -876,7 +876,7 @@ body.no-analysis #ovBody { display: none; }
       <div class="rd-page-header">
         <div class="rd-page-copy">
           <h1 class="title">주제별 보기</h1>
-          <p class="subtitle">주제마다 칭찬과 불만이 얼마나 나왔는지 봅니다</p>
+          <p class="subtitle">무엇이 좋고 무엇이 문제인지 봅니다</p>
         </div>
       </div>
       <div id="tpBody" class="rd"></div>
@@ -886,7 +886,7 @@ body.no-analysis #ovBody { display: none; }
       <div class="rd-page-header">
         <div class="rd-page-copy">
           <h1 class="title">칭찬 분석</h1>
-          <p class="subtitle">플레이어가 무엇을 칭찬하고 무엇을 즐겼는지 봅니다</p>
+          <p class="subtitle">플레이어가 무엇을 재미있어했는지 봅니다</p>
         </div>
       </div>
       <div id="chBody" class="rd"></div>
@@ -896,7 +896,7 @@ body.no-analysis #ovBody { display: none; }
       <div class="rd-page-header">
         <div class="rd-page-copy">
           <h1 class="title">불만 분석</h1>
-          <p class="subtitle">불만에 어떤 말이 나오고, 유저가 무엇을 원하는지 봅니다</p>
+          <p class="subtitle">무엇이 왜 문제이고, 플레이어가 무엇을 바라는지 봅니다</p>
         </div>
       </div>
       <div id="rpDeep" class="rp"></div>
@@ -906,7 +906,7 @@ body.no-analysis #ovBody { display: none; }
       <div class="rd-page-header">
         <div class="rd-page-copy">
           <h1 class="title">리뷰 원문</h1>
-          <p class="subtitle">AI가 분석한 리뷰를 반응·주제·평가로 걸러 봅니다</p>
+          <p class="subtitle">AI의 분석이 맞는지 실제 리뷰로 확인합니다</p>
         </div>
       </div>
       <div id="rpReviews" class="rp"></div>
@@ -919,7 +919,7 @@ body.no-analysis #ovBody { display: none; }
       <div class="rd-page-header">
         <div class="rd-page-copy">
           <h1 class="title">분석 방법</h1>
-          <p class="subtitle">리뷰를 어떻게 모으고 분석했는지, 단계마다 누가(사람 · AI · 규칙) 처리했는지 적습니다</p>
+          <p class="subtitle">이 숫자를 얼마나 믿어도 되는지 봅니다</p>
         </div>
       </div>
       <div id="rpSample" class="rp"></div>
@@ -1804,7 +1804,7 @@ function keptSummary(kept) {
     : '이어서 하면 남은 리뷰만 분석합니다. 리뷰는 다시 모으지 않습니다.';
   return { text: parts.join(' · '), next: next };
 }
-const modelBusy = error => /모델이 지금 요청을 받아 주지 않습니다|하루 요청 한도/.test(error || '');
+const modelBusy = error => /모델이 지금 요청을 받아 주지 않습니다|하루 요청 한도|연달아 답을 주지 못해/.test(error || '');
 
 // 같은 설정으로 멈춘 자리부터. 사람이 버튼을 눌렀을 때만 부른다.
 function resumeRun() {

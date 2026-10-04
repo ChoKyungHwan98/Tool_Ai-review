@@ -30,15 +30,16 @@ sys.stdout.reconfigure(encoding="utf-8")
 from config import cfg
 import progress
 import openrouter_limits as limits
-from dashboard_evidence import FUN as FUN_TYPES   # MDA 프레임워크의 8가지 재미. 화면과 같은 목록을 쓴다
+from dashboard_evidence import korean_only
+from dashboard_evidence import FUN as FUN_TYPES  # MDA 프레임워크의 8가지 재미. 화면과 같은 목록을 쓴다
 
 API_KEY = cfg.OPENROUTER_API_KEY
 URL = cfg.OPENROUTER_URL
 
-THEME_VERSION = 2        # 주제 찾기 방식이 바뀌면 올린다. 예전 방식으로 만든 목록과 분류는 보관하고 다시 한다
+THEME_VERSION = 4        # 주제 찾기 방식이 바뀌면 올린다. 예전 방식으로 만든 목록과 분류는 보관하고 다시 한다
 THEME_SAMPLES = 3        # A에서 서로 다른 리뷰 묶음으로 후보를 찾는 횟수. 묶음 하나에 치우친 주제가 목록을 흔들지 않게 한다
 THEME_SAMPLE = 100       # 묶음 하나에 담는 리뷰 수
-THEME_MAX = 14           # 최종 주제 수 상한 ("기타" 제외). 더 많으면 주제끼리 겹쳐 분류가 갈린다
+THEME_MAX = 16           # 최종 주제 수 상한 ("기타" 제외). 더 많으면 주제끼리 겹쳐 분류가 갈린다
 # 느낌이나 평가이지 게임의 구성 요소가 아닌 말. AI가 이런 이름을 내면 규칙으로 뺀다.
 FEELING_WORDS = ("시간", "재미", "몰입", "중독", "성취", "만족", "추천", "평가", "갓겜", "기대")
 BATCH_B = 15             # B 한 번에 담을 리뷰 수. 고정 지시문 비용을 더 많은 리뷰가 나눠 낸다
@@ -54,6 +55,15 @@ BUSY_MESSAGE = ("'{model}' 모델이 지금 요청을 받아 주지 않습니다
 
 class FatalApiError(RuntimeError):
     """재시도해도 소용없는 오류 (모델 없음, 키 무효, 잔액 부족). 즉시 멈춘다."""
+
+
+class ModelBusy(FatalApiError):
+    """모델이 요청을 계속 거절한다. 한 건씩 다시 물으면 거절만 쌓여 몇 시간을 헛돌므로 멈추고 사람에게 알린다."""
+
+
+STALL_LIMIT = 3          # 연달아 이만큼의 묶음에서 한 건도 분류하지 못하면 멈춘다
+STALL_MESSAGE = ("AI가 연달아 답을 주지 못해 분석을 멈췄습니다. 잠시 뒤 이어서 하거나 다른 모델을 고르시면 됩니다. "
+                 "모아 둔 리뷰와 이미 분석한 결과는 그대로 남아 있습니다.")
 
 
 def path(name):
@@ -73,12 +83,43 @@ def clean_json(text):
     return text
 
 
+def parse_answer(content):
+    """AI가 준 글에서 답 목록을 읽는다.
+
+    모델에 따라 설명을 앞에 붙이거나, 배열 뒤에 괄호를 하나 더 붙이거나, 첫 항목만 배열에 넣고 나머지는 줄마다 객체로 준다.
+    글을 처음부터 훑으며 읽히는 JSON 조각을 모아, 가장 긴 목록과 따로 떨어진 객체들을 합친다."""
+    text = (content or "").strip()
+    decoder, best, loose, at = json.JSONDecoder(), [], [], 0
+    while at < len(text):
+        if text[at] not in "[{":
+            at += 1
+            continue
+        try:
+            value, end = decoder.raw_decode(text, at)
+        except ValueError:
+            at += 1
+            continue
+        if isinstance(value, dict) and isinstance(value.get("items"), list):
+            value = value["items"]
+        if isinstance(value, list):
+            found = [x for x in value if isinstance(x, dict)]
+            if len(found) > len(best):
+                loose, best = [], found      # 더 긴 목록이 나오면 앞에서 주운 것은 설명 속 예시였다
+        elif isinstance(value, dict):
+            loose.append(value)
+        at = end
+    if not best and not loose:
+        raise ValueError("AI 답을 JSON으로 읽지 못했습니다")
+    return best + loose
+
+
 async def ask(client, stage, system, user, max_tokens):
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     max_tokens = limits.answer_room(max_tokens)
     body = {
         **limits.model_fields(),
+        **limits.thinking_fields(),
         "messages": messages,
         "temperature": 0.2,
         "max_tokens": max_tokens,
@@ -99,10 +140,12 @@ async def ask(client, stage, system, user, max_tokens):
                     raise FatalApiError(limits.DAILY_MESSAGE)
                 rate_waits += 1
                 if rate_waits > 3:   # 실패한 429도 하루 한도에 들어가므로 오래 버티지 않는다
-                    raise RuntimeError(BUSY_MESSAGE.format(model=cfg.MODEL))
+                    raise ModelBusy(BUSY_MESSAGE.format(model=cfg.MODEL))
                 # 무료 모델은 여러 사람이 같이 써서 제공사 쪽이 붐비면 거절한다. 기다림을 15초, 30초, 60초로 늘려 가며 다시 묻는다.
                 await asyncio.sleep(limits.retry_after(r, 15.0 * 2 ** (rate_waits - 1) if limits.is_free() else 5.0))
                 continue
+            if r.status_code == 400 and body.pop("reasoning", None):
+                raise ValueError("선택한 모델이 생각 상한을 받지 않아 빼고 재시도합니다")
             if r.status_code in (400, 404) and body.pop("response_format", None):
                 raise ValueError("선택한 모델의 JSON 모드가 거부되어 일반 형식으로 재시도합니다")
             if r.status_code in (400, 401, 402, 403, 404):
@@ -114,7 +157,7 @@ async def ask(client, stage, system, user, max_tokens):
                 if isinstance(error, dict) and error.get("code") == 429:   # 본문에 담겨 오는 한도 초과
                     if limits.daily_limit_hit(str(error)):
                         raise FatalApiError(limits.DAILY_MESSAGE)
-                    raise RuntimeError(BUSY_MESSAGE.format(model=cfg.MODEL))
+                    raise ModelBusy(BUSY_MESSAGE.format(model=cfg.MODEL))
                 raise FatalApiError(str(error)[:200])
             usage = data.get("usage") or {}
             if guard:
@@ -129,7 +172,7 @@ async def ask(client, stage, system, user, max_tokens):
             content = data["choices"][0]["message"]["content"]
             if isinstance(content, list):
                 content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
-            parsed = json.loads(clean_json(content or ""))
+            parsed = parse_answer(content)
             if isinstance(parsed, dict):
                 parsed = parsed.get("items")
             if not isinstance(parsed, list):
@@ -207,7 +250,13 @@ SYSTEM_A = "게임 기획자를 돕는 리뷰 분석가입니다. JSON 객체만
 USER_A = """아래는 한 게임의 스팀 리뷰 {n}건입니다. 여러 언어가 섞일 수 있습니다. 주제 이름과 설명은 한국어로 쓰세요.
 {reviews}
 
-유저들이 반복해서 말하는 게임의 구성 요소를 6~12개 찾으세요.
+유저들이 반복해서 말하는 대상을 두 종류로 찾으세요. 합쳐서 8~14개입니다.
+① 게임의 구성 요소 6~10개: 유저가 무엇을 하며 노는지(예: 수집, 전투, 건축, 탐험, 멀티플레이, 육성, 제작, 자동화)와
+  무엇이 마음에 드는지(예: 캐릭터 디자인 — 외형·귀여움). 칭찬 리뷰에서 주로 나옵니다.
+  "귀엽다"와 "잡아서 모은다"는 서로 다른 주제입니다. 동료·부하에게 일을 시키는 시스템(작업 AI, 자동화)도 따로 잡으세요.
+② 기능은 아니지만 반복해서 나오는 불만의 대상 2~4개.
+- 기능이 아닌 대상의 예: "버그"(오류·끼임·튕김), "콘텐츠 분량"(후반에 할 거리), "밸런스", "독창성"(다른 게임과 닮음), "가격", "업데이트"(운영·패치).
+  리뷰에 여러 번 나오면 반드시 주제로 넣으세요. 빼면 그 불만은 어느 주제에도 들어가지 못합니다.
 - name: 이 게임에 맞는 구체적인 대상 이름, 한국어 2~6자.
   좋은 예: "저장", "조작", "서버 동기화", "최적화", "인벤토리", "튜토리얼", "전투", "가격"
   나쁜 예: "게임플레이"(너무 넓음), "멋진 캐릭터"(평가가 들어감), "RPG"·"액션"(장르 이름)
@@ -221,11 +270,15 @@ USER_A = """아래는 한 게임의 스팀 리뷰 {n}건입니다. 여러 언어
 USER_A2 = """같은 게임의 리뷰를 여러 묶음으로 나눠 찾은 주제 후보입니다. seen은 그 후보가 나온 묶음 수입니다.
 {candidates}
 
-후보를 정리해 최종 주제를 8~{limit}개로 만드세요.
+후보를 정리해 최종 주제를 10~{limit}개로 만드세요. 게임의 구성 요소(무엇을 하며 노는지)가 절반을 넘어야 합니다.
+- 구성 요소 후보(수집, 탐험, 육성, 멀티플레이, 캐릭터 디자인, 자동화 등)는 한 묶음에만 나왔어도 남기세요. 칭찬은 여기에 붙습니다.
+- desc에는 그 주제에 들어가는 구체적인 낱말을 적으세요. 예: 수집 → "잡기·포획·도감 채우기", 캐릭터 디자인 → "외형·귀여움".
 - 같은 문제·같은 대상을 가리키는 후보는 하나로 합치세요.
   예: "저장"과 "데이터 삭제"(둘 다 세이브가 사라지는 문제), "렉"과 "최적화", "팰"과 "팰 디자인"
-- 여러 묶음에서 나온 후보를 먼저 남기고, 한 묶음에만 나온 지엽적인 후보는 빼세요.
-- 게임의 구성 요소만 남기세요. 느낌·상태("시간 순삭", "몰입", "중독", "재미")와 장르 이름은 빼세요.
+- 불만 대상 후보는 여러 묶음에서 나온 것을 먼저 남기고, 한 묶음에만 나온 지엽적인 것은 빼세요.
+- 게임의 구성 요소와, 기능은 아니지만 반복해서 나오는 불만의 대상("버그", "콘텐츠 분량", "밸런스", "독창성", "가격", "업데이트")을 남기세요.
+  이런 후보가 있으면 지엽적이라고 빼지 마세요. 성능(렉·프레임)과 버그(오류·끼임)는 서로 다른 주제입니다.
+- 느낌·상태("시간 순삭", "몰입", "중독", "재미")와 장르 이름은 빼세요.
 - 주제끼리 범위가 겹치지 않게 하세요. 한 리뷰 문장이 두 주제에 똑같이 들어맞으면 둘을 합치거나 경계를 나누세요.
   예: "팰"에 포획·육성을 넣었다면 "수집"을 따로 두지 않습니다.
 - name: 한국어 2~6자, 좋다·나쁘다 없이.
@@ -339,10 +392,18 @@ USER_B = """주제 (이름: 무엇이 들어가는지): {themes}
 - s: P 긍정, N 부정, M 섞임, U 판단 불가
 - s와 주제별 P/N은 리뷰 문장으로 판단하세요. 추천 여부(up)만으로 감정을 정하지 마세요.
   "시간이 사라진다", "잠을 못 잔다", "현생이 망한다"는 빠져들었다는 칭찬입니다 → P
+  추천한(up=1) 리뷰가 "내 시간 돌려줘", "시간이 삭제된다", "주말이 사라졌다", "하지 마라 인생 망한다", "마약 같다"처럼
+  시간·생활을 빼앗겼다고만 말하면 농담 섞인 칭찬입니다 → s는 P, t는 [].
+  "시간이 삭제된다"는 저장 데이터가 지워졌다는 뜻이 아닙니다. 세이브·데이터·진행 상황이 사라졌다고 써야 저장 불만입니다.
+  다른 회사나 다른 게임을 꾸짖는 말("○○는 이거 보고 반성해라")은 이 게임 칭찬입니다 → P.
+  추천한(up=1) 짧은 글이 구체적인 문제를 말하지 않으면 N으로 하지 마세요. 뜻을 알 수 없으면 U입니다.
 - f: 긍정·섞임 리뷰는 드러난 재미 종류를 1~2개 고르세요 (위 목록에서만). 근거가 전혀 없을 때만 []
 - t: 리뷰가 구체적인 대상을 말했을 때만 넣고, 주제별 P 또는 N. 주제 이름만 적으세요(설명은 빼고).
   낱말이 같아도 설명과 뜻이 다르면 넣지 마세요. 예: "거점을 최적화"는 성능 얘기가 아닙니다.
   "재밌다", "갓겜" 같은 막연한 말은 주제가 아닙니다 → []
+  글에 그 주제의 대상이 글자로 나오지 않으면 붙이지 마세요. 짐작으로 붙이지 않습니다.
+  "여러 게임을 잘 섞었다", "노가다가 좋다", "업데이트 고맙다"처럼 어느 대상인지 알 수 없는 글 → []
+  "귀엽다"만 있으면 외형 주제가 있을 때만 거기에 붙이고, 수집·육성 같은 다른 주제에는 붙이지 마세요.
   구체적인 대상인데 목록에 없을 때만 "기타"
 - k: 유저 입장 한 줄, 20자 이내
 
@@ -354,7 +415,13 @@ USER_B = """주제 (이름: 무엇이 들어가는지): {themes}
 "재밌게 잘 놀았습니다"
 → {{"id":"3","s":"P","f":[],"t":[],"k":"만족"}}
 "실행하자마자 튕겨서 환불함"
-→ {{"id":"4","s":"N","f":[],"t":[["최적화","N"]],"k":"실행 즉시 튕김"}}"""
+→ {{"id":"4","s":"N","f":[],"t":[["최적화","N"]],"k":"실행 즉시 튕김"}}
+"뭐야 내 시간 돌려줘요" (up=1)
+→ {{"id":"5","s":"P","f":["몰두"],"t":[],"k":"시간 가는 줄 모름"}}
+"시간이 삭제됩니다 살려주세요" (up=1)
+→ {{"id":"6","s":"P","f":["몰두"],"t":[],"k":"시간이 순식간에 감"}}
+"이것저것 다 섞어 놓은 비빔밥 같은 갓겜" (up=1)
+→ {{"id":"7","s":"P","f":[],"t":[],"k":"여러 요소를 잘 섞음"}}"""
 
 
 def clean_tags(raw, names):
@@ -385,7 +452,7 @@ async def classify(client, long_rows, themes):
 
     f_v3 = open(out_path, "a", encoding="utf-8")
 
-    stats = {"ok": 0, "fail": 0}
+    stats = {"ok": 0, "fail": 0, "stalled": 0}
     sem = asyncio.Semaphore(limits.concurrency(CONCURRENCY))
 
     def save(src, res):
@@ -395,7 +462,7 @@ async def classify(client, long_rows, themes):
             "s": res.get("s") if res.get("s") in ("P", "N", "M", "U") else "U",
             "f": [x for x in (res.get("f") or []) if isinstance(x, str) and x in FUN_TYPES][:2],
             "t": clean_tags(res.get("t"), theme_names),
-            "k": str(res.get("k", ""))[:40],
+            "k": korean_only(res.get("k", ""))[:40],
         }
         f_v3.write(json.dumps(item, ensure_ascii=False) + "\n")
         done[item["id"]] = item
@@ -410,37 +477,55 @@ async def classify(client, long_rows, themes):
 
     async def run(batch):
         async with sem:
-            payload = [brief(r) for r in batch]
-            user = USER_B.format(themes=theme_guide(themes), fun=", ".join(fun_names), reviews=compact(payload))
+            if stats["stalled"] >= STALL_LIMIT:   # 이미 멈추기로 했으면 남은 묶음은 묻지 않는다
+                raise FatalApiError(STALL_MESSAGE)
+            before = stats["ok"]
             try:
-                res = await ask(client, "B", SYSTEM_B, user, 90 * len(batch) + 60)
-                by_id = {str(x.get("id")): x for x in res if isinstance(x, dict)}
-                missing = [r for r in batch if r["recommendationid"] not in by_id]
-                for r in batch:
-                    if r["recommendationid"] in by_id:
-                        save(r, by_id[r["recommendationid"]])
-                if not missing:
-                    return
-                batch = missing
-            except (FatalApiError, BudgetExceeded):
-                raise
-            except Exception as e:
-                print(f"  [B 묶음 실패 → 한 건씩] {str(e)[:80]}")
-            for r in batch:  # 빠진 것만 한 건씩 다시
-                one = [brief(r)]
-                try:
-                    res = await ask(client, "B", SYSTEM_B,
-                                    USER_B.format(themes=theme_guide(themes), fun=", ".join(fun_names),
-                                                  reviews=compact(one)), 150)
-                    if res and isinstance(res[0], dict) and str(res[0].get("id")) == r["recommendationid"]:
-                        save(r, res[0])
-                    else:
-                        stats["fail"] += 1
-                except (FatalApiError, BudgetExceeded):
-                    raise
-                except Exception:
-                    stats["fail"] += 1
-            f_v3.flush()
+                await attempt(batch)
+            finally:
+                f_v3.flush()
+            stats["stalled"] = 0 if stats["ok"] > before else stats["stalled"] + 1
+            if stats["stalled"] >= STALL_LIMIT:
+                raise FatalApiError(STALL_MESSAGE)
+
+    async def attempt(batch):
+        payload = [brief(r) for r in batch]
+        user = USER_B.format(themes=theme_guide(themes), fun=", ".join(fun_names), reviews=compact(payload))
+        try:
+            res = await ask(client, "B", SYSTEM_B, user, 90 * len(batch) + 60)
+            by_id = {str(x.get("id")): x for x in res if isinstance(x, dict)}
+            missing = [r for r in batch if r["recommendationid"] not in by_id]
+            for r in batch:
+                if r["recommendationid"] in by_id:
+                    save(r, by_id[r["recommendationid"]])
+            if not missing:
+                return
+            batch = missing
+        except (FatalApiError, BudgetExceeded):
+            raise
+        except Exception as e:
+            print(f"  [B 묶음 실패 → 한 건씩] {str(e)[:80]}")
+        for r in batch:  # 빠진 것만 한 건씩 다시
+            if not await single(r):
+                missed.append(r)
+
+    missed = []   # 한 건씩 물어도 답을 못 받은 리뷰. 모든 묶음이 끝난 뒤 한 번 더 묻는다
+
+    async def single(r):
+        try:
+            res = await ask(client, "B", SYSTEM_B,
+                            USER_B.format(themes=theme_guide(themes), fun=", ".join(fun_names),
+                                          reviews=compact([brief(r)])), 150)
+        except (FatalApiError, BudgetExceeded):
+            raise
+        except Exception:
+            return False
+        # 한 건만 물었으므로 답이 하나면 번호를 다르게 적어 와도 이 리뷰의 답이다
+        answers = [x for x in res if isinstance(x, dict)]
+        if len(answers) != 1:
+            return False
+        save(r, answers[0])
+        return True
 
     batches = [pending[i:i + BATCH_B] for i in range(0, len(pending), BATCH_B)]
     tasks = [asyncio.create_task(run(b)) for b in batches]
@@ -450,6 +535,11 @@ async def classify(client, long_rows, themes):
             f_v3.flush()
             if i % max(1, len(batches) // 10) == 0 or i == len(batches):
                 print(f"  [B] {i}/{len(batches)} 묶음 · 성공 {stats['ok']} · 실패 {stats['fail']}")
+        for r in [r for r in missed if r["recommendationid"] not in done]:
+            if not await single(r):
+                stats["fail"] += 1
+        if missed:
+            print(f"  [B] 빠진 {len(missed)}건을 다시 물어 {sum(r['recommendationid'] in done for r in missed)}건을 채웠습니다")
     except (FatalApiError, BudgetExceeded):
         for t in tasks:
             t.cancel()

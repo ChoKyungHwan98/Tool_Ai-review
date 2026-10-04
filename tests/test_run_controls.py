@@ -71,7 +71,7 @@ class RunControlsTests(unittest.TestCase):
             (complete / "insights_v5.json").write_text("{}", encoding="utf-8")
             with patch.object(main.cfg, "PROJECTS_DIR", str(root)), \
                  patch.object(main, "_load_games", return_value=[{"app_id": 1}, {"app_id": 2}]):
-                self.assertEqual(main.list_games(), {"games": [{"app_id": 1}]})
+                self.assertEqual(main.list_games(), {"games": [{"app_id": 1}], "unfinished": []})   # 기록조차 없는 것은 어디에도 없다
 
     def test_new_project_published_only_after_successful_insights(self):
         class DeferredTasks:

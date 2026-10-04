@@ -27,7 +27,7 @@ from fastapi.responses import HTMLResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from config import cfg
-from dashboard_evidence import build_evidence, evidence_page, load_sources, review_hours
+from dashboard_evidence import build_evidence, evidence_page, korean_only, load_sources, review_hours
 import analysis_design
 import quality_check
 import sampling
@@ -123,7 +123,40 @@ def list_games():
         folder = os.path.join(cfg.PROJECTS_DIR, str(game.get("app_id")))
         if os.path.isfile(os.path.join(folder, "insights_v5.json")):
             visible.append(game)
-    return {"games": visible}
+    return {"games": visible, "unfinished": unfinished_runs()}
+
+
+_GAME_INFO = {}   # 끝나지 못한 분석은 games.json에 없어서 이름을 Steam에 묻는다. 한 번 물은 것은 기억해 둔다.
+
+
+def unfinished_runs():
+    """끝나지 못한 분석(멈췄거나 지금 돌고 있는 것). 뒤에 남은 것을 사람이 모르는 일이 없도록 홈이 보여 준다."""
+    known = {str(game.get("app_id")): game for game in _load_games()}
+    try:
+        names = sorted(os.listdir(cfg.PROJECTS_DIR))
+    except OSError:
+        return []
+    runs = []
+    for name in names:
+        folder = os.path.join(cfg.PROJECTS_DIR, name)
+        if not name.isdigit() or os.path.isfile(os.path.join(folder, "insights_v5.json")):
+            continue
+        if not os.path.isfile(os.path.join(folder, "pipeline_result.json")):
+            continue
+        record = pipeline_last_result(int(name))
+        if record.get("status") not in ("failed", "running"):
+            continue
+        info = known.get(name) or _GAME_INFO.get(name)
+        if info is None:
+            try:
+                info = _GAME_INFO[name] = search_steam_game(int(name))
+            except Exception:
+                info = {"name": f"App {name}", "header_image": ""}
+        runs.append({"app_id": int(name), "name": info.get("name"), "header_image": info.get("header_image", ""),
+                     "status": "running" if record["status"] == "running" else "stopped",
+                     "error": record.get("error"), "kept": record["kept"],
+                     "progress": record["live"]["progress"], "request": record.get("request")})
+    return runs
 
 
 @app.delete("/api/games/{app_id}", summary="프로젝트 삭제", include_in_schema=False)
@@ -313,6 +346,9 @@ def dashboard_data_v5(app_id: int = None):
     folder = os.path.dirname(path)
     # 저장된 파일에서는 AI가 쓴 것(요약·할 일·주제 설명)만 읽는다. 건수와 점수는 지금 다시 센다.
     data = {key: saved.get(key) for key in ("generated_at", "summary", "themes", "actions", "usage")}
+    if saved.get("summary_source") == "rule":
+        # AI 요약이 실패한 분석. 예전에는 불만 조각 하나를 그대로 적어 두었는데, 그것은 AI가 요약한 내용이 아니다.
+        data["actions"] = [{**a, "prob": "", "why": "", "fix": []} for a in data.get("actions") or []]
     data["game"] = {
         "app_id": app_id,
         "name": (game_info.get("name_kr") or game_info.get("name")) if game_info else f"App {app_id}",
@@ -350,7 +386,7 @@ def review_rows(directory):
             "voted_up": original.get("voted_up", ""),
             "playtime_h": review_hours(original),
             "overall_sentiment": SENTIMENT_NAMES.get(item.get("s"), "NEUTRAL"),
-            "key_phrase": item.get("k", ""),
+            "key_phrase": korean_only(item.get("k", "")),
             "keywords": "|".join(dict.fromkeys(tags)),        # 주제 이름
             "language": original.get("language", ""),
             "helpful": original.get("votes_up", ""),          # 리뷰 원문 화면의 정렬에 쓴다

@@ -53,6 +53,15 @@ def model_fields():
     return {"models": [cfg.MODEL, *fallbacks]} if fallbacks and is_free() else {"model": cfg.MODEL}
 
 
+THINKING_CAP = 400
+
+
+def thinking_fields():
+    """'생각'에 쓸 토큰 상한. 대신 답하는 무료 모델 중에는 답 길이 한도를 생각에 다 써 버려 빈 답을 주는 모델이 있다
+    (묶음마다 40초씩 쓰고 한 건도 분류하지 못한다). 상한을 두면 같은 묶음을 몇 초 만에 답한다. 생각하지 않는 모델은 이 값을 무시한다."""
+    return {"reasoning": {"max_tokens": THINKING_CAP}} if is_free() else {}
+
+
 def answer_room(max_tokens):
     """답 길이 한도. 무료 모델 중에는 답을 쓰기 전에 '생각'에 토큰을 쓰는 모델이 있어, 한도가 빠듯하면 답이 비어서 온다.
     무료 모델은 비용이 없으므로 네 배로 넉넉히 준다."""

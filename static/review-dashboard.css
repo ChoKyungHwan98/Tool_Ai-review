@@ -167,6 +167,10 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
 .rd-pane-wide { grid-column:1 / -1; }
 .rd-pane-half { grid-column:span 6; }
 .rd-focus { grid-column:1 / -1; }
+/* 선택한 주제는 제목 카드와 내용별 카드로 나눈다. 한 카드에 여러 내용을 넣지 않는다. */
+.rd-pane.rd-focus { display:grid; gap:16px; background:transparent; border:0; border-radius:0; }
+.rd-focus > .rd-pane-head, .rd-focus .rd-sec { background:var(--rd-surface); border:1px dashed var(--rd-card-line); border-radius:var(--rd-radius); }
+.rd-focus > .rd-pane-head { align-items:center; padding:20px var(--rd-pad); }
 .rd-pane {
   display:flex; flex-direction:column; min-width:0;
   background:var(--rd-surface); border:1px dashed var(--rd-card-line); border-radius:var(--rd-radius);
@@ -183,7 +187,9 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
 .rd-pane-body { padding:16px var(--rd-pad) var(--rd-pad); min-width:0; }
 .rd-pane-body.is-center { flex:1; display:flex; flex-direction:column; justify-content:center; }
 /* ---------- 리뷰 추이: ApexCharts 차트 하나. 여기서는 기간 전환과 최신화 버튼 자리만 꾸민다 ---------- */
-.rd-pane-tools { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+.rd-pane-tools { display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end; margin-left:auto; }   /* 기간 전환·최신화를 ⓘ 바로 왼쪽에 붙인다 */
+.rd-pane-head:has(> .rd-pane-tools) { align-items:center; gap:8px; }
+.rd-pane-head:has(> .rd-pane-tools) .rd-info-btn { margin:0 -6px 0 0; }
 .rd-seg { display:flex; gap:2px; padding:4px; border-radius:var(--rd-radius-control); background:var(--rd-soft); }
 .rd-seg button { white-space:nowrap; border:0; border-radius:8px; background:transparent; padding:7px 12px; font-size:14px; font-weight:500; line-height:normal; color:var(--rd-sub); }
 .rd-seg button:hover { color:var(--rd-ink); }
@@ -256,7 +262,8 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
 .rd-map-axis { stroke:#B0B8C1; }
 .rd-map-tick { font-size:13px; fill:var(--rd-sub,#5F6977); }
 /* 영역 이름: 칸 한가운데에 까는 바탕 글자. 원과 주제 이름보다 뒤에 있으므로 옅게 */
-.rd-q-label { font-weight:700; fill:var(--rd-sub,#5F6977); fill-opacity:.5; pointer-events:none; }
+.rd-rank-foot { margin:12px 0 0; padding:10px 12px; border-radius:8px; background:var(--rd-soft); font-size:13px; line-height:1.5; color:var(--rd-text); }
+.rd-q-label { font-weight:600; fill:var(--rd-sub,#5F6977); fill-opacity:.62; pointer-events:none; }
 .rd-q-label.is-watch { fill:var(--rd-neg-ink,#74498C); }
 .rd-q-label.is-small { fill:var(--rd-pos-ink,#1A73C4); }
 .rd-q-label.is-fix { fill:var(--rd-neg-ink,#74498C); }
@@ -287,12 +294,11 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
 /* ---------- 좁은 화면용 칭찬·불만 막대. 행: [주제명][플롯][태그], 플롯 안에서 --zero가 0선 위치 ---------- */
 
 /* ---------- 근거 카드: 선택한 주제의 수치 · 구간 · AI 요약 · 대표 리뷰를 가로로 펼친다 ---------- */
-.rd-focus-badge { display:inline-flex; align-items:center; flex:none; height:26px; padding:0 10px; border-radius:999px; background:var(--rd-pos-bg); color:var(--rd-pos-ink); font-size:13px; font-weight:600; }
+.rd-focus-badge { display:inline-flex; align-items:center; flex:none; height:26px; margin-left:10px; padding:0 10px; vertical-align:middle; border-radius:999px; background:var(--rd-pos-bg); color:var(--rd-pos-ink); font-size:13px; font-weight:600; }
 .rd-focus:is(.is-concern, .is-watch, .is-disliked) .rd-focus-badge { background:var(--rd-neg-bg); color:var(--rd-neg-deep); }
-.rd-focus-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); padding:8px 0 4px; }
-.rd-sec { min-width:0; padding:16px var(--rd-pad) 20px; }
-.rd-sec + .rd-sec { border-left:1px dashed var(--rd-card-line); }
-.rd-sec h3 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:14px; font-size:14px; font-weight:600; color:var(--rd-ink); }
+.rd-focus-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:16px; }
+.rd-sec { min-width:0; padding:20px var(--rd-pad); }
+.rd-sec h3 { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:14px; font-size:16px; font-weight:600; color:var(--rd-ink); }
 .rd-sec h3 .rd-icon { color:var(--rd-sub); }
 .rd-sec h3 small { font-size:13px; font-weight:400; color:var(--rd-sub); }
 .rd-cols { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; }
@@ -506,7 +512,6 @@ button.rd-kpi[aria-pressed="true"] { border-style:solid; border-color:var(--rd-i
   .rd-kpi > :not(.rd-icon) { grid-column:1; }
   .rd-kpi small { white-space:normal; }
   .rd-kpi-value { flex-wrap:wrap; }
-  .rd-sec + .rd-sec { border-left:0; border-top:1px dashed var(--rd-card-line); }
   .rd-strip { padding:12px 16px; gap:12px 20px; }
   .rd-voices { grid-template-columns:minmax(0,1fr); gap:8px; }
   .rd-mood, .rd-pane-mood .rd-mood { grid-template-columns:minmax(0,1fr); gap:16px; }

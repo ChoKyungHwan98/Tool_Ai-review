@@ -260,6 +260,26 @@
       padding: 0 4px;
     }
 
+    /* 끝나지 못한 분석 카드. 완료된 카드와 같은 틀에 상태·남은 것·버튼만 더한다. */
+    .card-badge {
+      position: absolute; top: 12px; left: 12px; padding: 5px 10px; border-radius: 8px;
+      background: #FFF4E0; color: #8A4B00; font-size: 13px; font-weight: 600;
+    }
+    .card-badge.is-running { background: #E8F1FD; color: #1B4FA8; }
+    .card-note { padding: 0 4px; color: var(--color-text-sub); font-size: 13px; line-height: 1.6; }
+    .card-bar { height: 6px; margin: 10px 4px 8px; border-radius: 3px; background: #E5E8EB; overflow: hidden; }
+    .card-bar span { display: block; height: 100%; background: #5F6977; }
+    .card-bar.is-running span { background: var(--color-primary); }
+    .card-actions { display: flex; gap: 8px; margin-top: 14px; }
+    .card-actions button {
+      height: 40px; padding: 0 16px; border: 1px solid #D8DDE4; border-radius: 12px; background: #fff;
+      color: #B43D37; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    .card-actions .is-main { flex: 1; border-color: var(--color-text-title); background: var(--color-text-title); color: #fff; }
+    .card-actions button[disabled] { opacity: .6; cursor: default; }
+    .card-status { min-height: 0; padding: 8px 4px 0; color: #B33B35; font-size: 13px; line-height: 1.5; }
+    .card-status:empty { display: none; }
+
     /* Bottom Nav */
     .sidebar-bottom {
       margin-top: auto;
@@ -409,7 +429,141 @@
     let homeMenuAt = { x: 0, y: 0 };
     let homeDeletingId = null;
 
-    const homeGameOf = (id) => homeGames.find((game) => String(game.app_id) === String(id));
+    let homeUnfinished = [];   // 멈췄거나 지금 돌고 있는 분석. 뒤에 남은 것을 모르는 일이 없도록 목록에 같이 보여 준다.
+
+    const homeRunOf = (id) => homeUnfinished.find((run) => String(run.app_id) === String(id));
+    const homeGameOf = (id) => homeGames.find((game) => String(game.app_id) === String(id)) || homeRunOf(id);
+
+    function attachHomeMenu(card, id) {
+      // WebView2는 기본 컨텍스트 메뉴를 끄기 때문에 두 경로 모두에서 연다.
+      card.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        openHomeMenu(String(id), event.clientX, event.clientY);
+      });
+      card.addEventListener('pointerdown', (event) => {
+        if (event.button !== 2) return;
+        event.preventDefault();
+        event.stopPropagation();
+        openHomeMenu(String(id), event.clientX, event.clientY);
+      });
+    }
+
+    // 남아 있는 것 한 줄과 막대 길이(0~1). 막대를 그릴 수 없으면 null.
+    function homeKept(run) {
+      const k = run.kept || {}, p = run.progress || {}, n = (v) => Number(v).toLocaleString();
+      const total = p.stage === 'classify' ? Number(p.total) || 0 : 0;
+      if (k.collected && k.classified) {
+        return { text: '모은 리뷰 ' + n(k.collected) + '건 · 분류 ' + (total ? n(total) + '건 중 ' : '') + n(k.classified) + '건까지 남아 있습니다.',
+                 share: total ? Math.min(1, k.classified / total) : null };
+      }
+      if (k.collected) return { text: '모은 리뷰 ' + n(k.collected) + '건이 남아 있습니다.', share: null };
+      if (k.scanned) {
+        return { text: (k.scan_total ? '리뷰 ' + n(k.scan_total) + '건 중 ' : '리뷰 ') + n(k.scanned) + '건까지 훑어 두었습니다.',
+                 share: k.scan_total ? Math.min(1, k.scanned / k.scan_total) : null };
+      }
+      return { text: run.status === 'running' ? '' : '남아 있는 작업이 없습니다. 지우고 새로 분석하시면 됩니다.', share: null };
+    }
+
+    const homeModelBusy = (error) => /모델이 지금 요청을 받아 주지 않습니다|하루 요청 한도|연달아 답을 주지 못해/.test(error || '');
+
+    // 저장된 설정 그대로 멈춘 자리부터 다시 시작한다. 사람이 버튼을 눌렀을 때만 부른다.
+    async function resumeFromHome(run, button, status) {
+      const page = dashboardUrlFromHome({ app_id: run.app_id, pending: 1 });
+      // 모델이 붐벼서 멈춘 분석은 같은 모델로 다시 막힐 수 있다. 멈춘 화면에서 모델을 고르게 한다.
+      if (!run.request || !run.request.app_id || homeModelBusy(run.error)) { window.location.href = page; return; }
+      button.disabled = true;
+      status.textContent = '';
+      let response;
+      try {
+        response = await fetch('/pipeline/run', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...run.request, incremental: false }),
+        });
+      } catch (e) { status.textContent = '분석 서버에 연결하지 못해 시작하지 못했습니다.'; button.disabled = false; return; }
+      if (!response.ok) {
+        const value = await response.json().catch(() => ({}));
+        status.textContent = '분석을 시작하지 못했습니다. ' + (value.detail || '');
+        button.disabled = false;
+        return;
+      }
+      window.location.href = page;
+    }
+
+    function homeRunCard(run) {
+      const running = run.status === 'running';
+      const card = document.createElement('a');
+      card.className = 'project-card';
+      card.href = dashboardUrlFromHome({ app_id: run.app_id, pending: 1 });
+      card.draggable = false;
+
+      const preview = document.createElement('div');
+      preview.className = 'card-preview';
+      if (run.header_image) {
+        const image = document.createElement('img');
+        image.src = run.header_image;
+        image.alt = '';
+        image.onerror = function () { this.style.display = 'none'; };
+        preview.appendChild(image);
+      }
+      const badge = document.createElement('span');
+      badge.className = 'card-badge' + (running ? ' is-running' : '');
+      badge.textContent = running ? '분석 중' : '멈춘 분석';
+      preview.appendChild(badge);
+      card.appendChild(preview);
+
+      const title = document.createElement('div');
+      title.className = 'card-title';
+      title.textContent = run.name;
+      card.appendChild(title);
+
+      if (!running && run.error) {
+        const reason = document.createElement('div');
+        reason.className = 'card-note';
+        reason.textContent = run.error;
+        card.appendChild(reason);
+      }
+      const kept = homeKept(run);
+      if (kept.share !== null) {
+        const bar = document.createElement('div');
+        bar.className = 'card-bar' + (running ? ' is-running' : '');
+        const fill = document.createElement('span');
+        fill.style.width = Math.round(kept.share * 100) + '%';
+        bar.appendChild(fill);
+        card.appendChild(bar);
+      }
+      if (kept.text) {
+        const note = document.createElement('div');
+        note.className = 'card-note';
+        note.textContent = kept.text;
+        card.appendChild(note);
+      }
+
+      if (!running) {
+        const actions = document.createElement('div');
+        actions.className = 'card-actions';
+        const status = document.createElement('div');
+        status.className = 'card-status';
+        const resume = document.createElement('button');
+        resume.type = 'button';
+        resume.className = 'is-main';
+        resume.textContent = '이어서 하기';
+        resume.addEventListener('click', (event) => { event.preventDefault(); resumeFromHome(run, resume, status); });
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = '지우기';
+        remove.addEventListener('click', (event) => {
+          event.preventDefault();
+          homeDeletingId = String(run.app_id);
+          renderHomeDeleteDialog();
+        });
+        actions.appendChild(resume);
+        actions.appendChild(remove);
+        card.appendChild(actions);
+        card.appendChild(status);
+        attachHomeMenu(card, run.app_id);
+      }
+      return card;
+    }
 
     function homeCard(game) {
       const card = document.createElement('a');
@@ -436,25 +590,18 @@
       card.appendChild(title);
       card.appendChild(meta);
 
-      // WebView2는 기본 컨텍스트 메뉴를 끄기 때문에 두 경로 모두에서 연다.
-      card.addEventListener('contextmenu', (event) => {
-        event.preventDefault();
-        openHomeMenu(String(game.app_id), event.clientX, event.clientY);
-      });
-      card.addEventListener('pointerdown', (event) => {
-        if (event.button !== 2) return;
-        event.preventDefault();
-        event.stopPropagation();
-        openHomeMenu(String(game.app_id), event.clientX, event.clientY);
-      });
+      attachHomeMenu(card, game.app_id);
       return card;
     }
 
     function renderHome() {
       const grid = document.getElementById('projectGrid');
       grid.innerHTML = '';
-      const visible = homeGames.filter((game) => !homeQuery || String(game.name).toLowerCase().includes(homeQuery));
-      if (visible.length === 0) {
+      const matches = (item) => !homeQuery || String(item.name).toLowerCase().includes(homeQuery);
+      const visible = homeGames.filter(matches);
+      const unfinished = homeUnfinished.filter(matches);
+      unfinished.forEach((run) => grid.appendChild(homeRunCard(run)));   // 끝나지 못한 분석을 맨 앞에 둔다
+      if (visible.length === 0 && unfinished.length === 0) {
         const empty = document.createElement('div');
         empty.style.cssText = 'color:var(--color-text-sub); padding:20px;';
         empty.textContent = homeQuery ? '검색 결과가 없습니다.' : '진행 중인 프로젝트가 없습니다.';
@@ -528,9 +675,12 @@
       dialog.setAttribute('aria-modal', 'true');
 
       const heading = document.createElement('h2');
-      heading.textContent = '‘' + (game ? game.name : homeDeletingId) + '’ 프로젝트를 삭제할까요?';
+      const stopped = Boolean(homeRunOf(homeDeletingId));
+      heading.textContent = '‘' + (game ? game.name : homeDeletingId) + (stopped ? '’의 멈춘 분석을 지울까요?' : '’ 프로젝트를 삭제할까요?');
       const note = document.createElement('p');
-      note.textContent = '프로젝트 폴더는 AI 리뷰데이터 분석 휴지통으로 옮겨지므로 직접 복구할 수 있습니다.';
+      note.textContent = stopped
+        ? '모은 리뷰와 분류 결과가 AI 리뷰데이터 분석 휴지통으로 옮겨지므로 직접 복구할 수 있습니다.'
+        : '프로젝트 폴더는 AI 리뷰데이터 분석 휴지통으로 옮겨지므로 직접 복구할 수 있습니다.';
       const status = document.createElement('div');
       status.className = 'home-delete-status';
 
@@ -558,6 +708,7 @@
           return;
         }
         homeGames = homeGames.filter((game) => String(game.app_id) !== String(id));
+        homeUnfinished = homeUnfinished.filter((run) => String(run.app_id) !== String(id));
         homeDeletingId = null;
         renderHome();
       });
@@ -591,6 +742,7 @@
         if (!response.ok) throw new Error('목록을 불러오지 못했습니다.');
         const data = await response.json();
         homeGames = data.games || [];
+        homeUnfinished = data.unfinished || [];
         renderHome();
       } catch (e) {
         grid.innerHTML = '<div style="color:red; padding:20px;">데이터를 불러오지 못했습니다.</div>';

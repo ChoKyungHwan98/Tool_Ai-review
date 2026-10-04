@@ -20,6 +20,65 @@
 .page:not([data-page="overview"]) > .title { margin:8px 0 0; font-size:20px; font-weight:600; line-height:1.3; letter-spacing:-.01em; color:var(--ui-ink); }
 .page:not([data-page="overview"]) > .subtitle { margin:2px 0 16px; max-width:none; font-size:13px; line-height:1.5; color:var(--ui-sub); }
 
+/* ---------- 분석 방법: 질문 네 개의 답 + 카드 세 장. 접지 않고 한 화면에 둔다 ---------- */
+.rp-grid.rp-method { align-items:stretch; }
+.rp-method-main { grid-column:span 5; display:grid; min-width:0; }
+.rp-method-main > .rp-card { display:flex; flex-direction:column; }
+.rp-method-main .rp-steps { flex:1; align-content:space-between; }
+.rp-method-side { grid-column:span 7; display:grid; gap:16px; min-width:0; grid-template-rows:auto 1fr; }
+.rp-method .rp-steps > li { grid-template-columns:84px 56px minmax(0,1fr); padding:6px 0 6px 28px; }
+.rp-method .rp-steps > li::before { top:12px; }
+.rp-method .rp-steps > li::after { top:24px; bottom:-10px; }
+.rp-method .rp-checks { grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:0; }
+.rp-method .rp-checks li { display:flex; flex-direction:column; align-items:flex-start; gap:4px; padding:12px 14px; border-top:0; border-radius:10px; background:var(--rp-soft); }
+.rp-method .rp-checks span { font-weight:600; }
+.rp-method .rp-checks small { font-weight:400; }
+.rp-method .rd-cross th small { display:inline; margin-left:6px; }
+.rp-method .rp-callout { margin-top:12px; }
+
+/* ---------- 불만 분석: 왼쪽 주제 목록 + 오른쪽 고른 주제. 한 화면에 들어온다 ---------- */
+.rp-grid.rp-problems { align-items:stretch; }   /* 두 카드의 아래 끝을 맞춘다 */
+.rp-problem-list { grid-column:span 4; display:flex; flex-direction:column; }
+.rp-problem-list .rp-poff { margin-top:auto; }
+.rp-pstack { grid-column:span 8; display:grid; gap:16px; grid-template-rows:auto auto 1fr; min-width:0; }
+.rp-pstack .rp-card { padding:20px var(--rp-pad); }
+.rp-pstack .rp-card-head { margin-bottom:10px; }
+.rp-phead { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.rp-phead h2 { margin:0; font-size:16px; font-weight:600; line-height:1.4; color:var(--rp-ink); }
+.rp-phead p { margin:2px 0 0; font-size:13px; line-height:1.5; color:var(--rp-sub); }
+.rp-phead .rd-btn { flex:none; }
+.rp-plist { display:grid; gap:2px; margin:0 -12px 10px; grid-auto-rows:38px; align-content:start; }
+.rp-pitem { display:grid; grid-template-columns:84px minmax(0,1fr) 52px; gap:12px; align-items:center; padding:0 12px; border:0; border-radius:8px; background:transparent; font:inherit; color:inherit; text-align:left; }
+.rp-pitem:hover { background:var(--rp-soft); }
+.rp-pitem[aria-pressed="true"] { background:var(--rp-soft); }
+.rp-pitem b { font-size:14px; font-weight:600; color:var(--rp-ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rp-ptrk i { display:block; height:12px; border-radius:3px; background:var(--rp-neg-mute); }
+.rp-pitem[aria-pressed="true"] .rp-ptrk i { background:var(--rp-neg); }
+.rp-pitem em { font-style:normal; font-size:13px; text-align:right; color:var(--rp-text); }
+.rp-poff { margin:0; padding:10px 12px; border-radius:8px; background:var(--rp-soft); font-size:13px; line-height:1.5; color:var(--rp-text); }
+.rp-pthree { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+.rp-pthree p, .rp-pthree li { margin:0; font-size:14px; line-height:1.55; color:var(--rp-ink); overflow-wrap:anywhere; }
+.rp-pthree ul { margin:0; padding:0 0 0 16px; }
+.rp-pthree li + li { margin-top:4px; }
+.rp-clamp { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.rp-pthree .rp-card { min-height:178px; }
+.rp-pthree li span span { font-size:13px; color:var(--rp-sub); white-space:nowrap; }
+.rp-pstack .is-none { margin:0; font-size:14px; color:var(--rp-sub); }
+.rp-ptwo { display:grid; grid-template-columns:minmax(0,4fr) minmax(0,5fr); gap:16px; }
+.rp-ptwo > .rp-card { display:flex; flex-direction:column; }
+.rp-pcols { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; flex:1; min-height:124px; max-height:300px; }   /* 카드 높이만큼 막대가 자라되 지나치게 길어지지 않는다 */
+.rp-pcol { display:flex; flex-direction:column; align-items:center; gap:6px; }
+.rp-pcol b { font-size:13px; font-weight:600; color:var(--rp-text); }
+.rp-pcol span { flex:1; width:100%; max-width:84px; display:flex; align-items:flex-end; border-radius:6px; background:var(--rp-soft); overflow:hidden; }
+.rp-pcol i { display:block; width:100%; background:var(--rp-neg-mute); }
+.rp-pcol.is-max i { background:var(--rp-neg); }
+.rp-pcol.is-max b { color:var(--rp-neg-ink); }
+.rp-pcol em { font-style:normal; font-size:13px; color:var(--rp-sub); white-space:nowrap; }
+.rp-ptwo blockquote { margin:0 0 6px; padding:10px 12px; border-radius:8px; background:var(--rp-soft); font-size:14px; line-height:1.6; color:var(--rp-text); overflow-wrap:anywhere; }
+.rp-ptwo blockquote span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }   /* 안쪽에서 자른다. 바깥에서 자르면 여백에 셋째 줄이 비친다 */
+.rp-pwho { margin:0 0 8px 2px; font-size:13px; color:var(--rp-sub); }
+.rp-pwho:last-child { margin-bottom:0; }
+
 /* ---------- 카드와 격자 ---------- */
 .rp-grid { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:16px; align-items:start; }
 .rp-card { min-width:0; padding:var(--rp-pad); background:#fff; border:1px dashed var(--rp-card-line); border-radius:var(--ui-card-radius); }
@@ -181,11 +240,21 @@
 .rp-checks small { display:block; font-size:13px; color:var(--rp-sub); }
 
 /* ---------- 반응형 ---------- */
+@media (prefers-reduced-motion: no-preference) {
+  .rp-pitem, .rp-ptrk i { transition:background-color .15s ease; }
+  .rp-pstack .rp-phead > div, .rp-pstack .rp-card > :not(.rp-card-head) { animation:rd-fade .22s ease both; }
+  .rp-pcol i { transform-origin:bottom; animation:rd-grow-y .4s cubic-bezier(.2,.7,.2,1) both; }
+}
+
 @media (max-width:1180px) {
+  .rp-method-main, .rp-method-side { grid-column:1 / -1; }
+  .rp-problem-list, .rp-pstack { grid-column:1 / -1; }
   .rp-half, .rp-third, .rp-col, .rp-design, .rp-side, .rp-main { grid-column:1 / -1; }
   .rp-side { position:static; }
 }
 @media (max-width:760px) {
+  .rp-method .rp-checks { grid-template-columns:1fr; }
+  .rp-pthree, .rp-ptwo { grid-template-columns:1fr; }
   .rp { --rp-pad:16px; }
   .rp-grid { gap:8px; }
   .rp-col { gap:8px; }

@@ -116,10 +116,9 @@ class DashboardEvidenceTests(unittest.TestCase):
         ]
         (self.folder / "complaints_v3.jsonl").write_text("\n".join(json.dumps(c, ensure_ascii=False) for c in complaints), encoding="utf-8")
         deep = build_evidence(self.folder, 42)["deep"]
-        storage = next(c for c in deep["causes"] if c["theme"] == "저장")
-        self.assertEqual(storage["reviews"], 2)
-        self.assertEqual(storage["terms"][0]["word"], "세이브")
-        self.assertEqual({t["word"] for t in storage["terms"]}, {"세이브", "파일"})
+        # 불만 메모는 낱말로 쪼개지 않고 문장 그대로, 도움됨이 많은 리뷰부터
+        self.assertEqual([n["prob"] for n in deep["notes"]["저장"]], ["세이브 파일 손상", "세이브 파일이 날아감"])
+        self.assertEqual(deep["notes"]["저장"][1]["why"], "서버 오류")
         # 2번만 비추천이고 2시간 플레이 → 초반 이탈
         self.assertEqual(deep["churn"]["early_n"], 1)
         self.assertEqual(deep["churn"]["topics"][0], {"name": "저장", "early": 1, "later": 0, "early_share": 100.0, "later_share": None})
@@ -132,7 +131,7 @@ class DashboardEvidenceTests(unittest.TestCase):
         deep = build_evidence(self.folder, 42)["deep"]
         self.assertFalse(deep["has_complaints"])
         self.assertEqual(deep["wants"], [])
-        self.assertTrue(all(c["terms"] == [] for c in deep["causes"]))
+        self.assertEqual(deep["notes"], {})
 
     def test_topics_ai_split_are_merged_by_rule(self):
         # '세이브'는 '저장'과 같은 리뷰·같은 불만에만 붙는다 → 규칙으로 합친다

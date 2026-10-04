@@ -220,7 +220,7 @@ def build_evidence(directory, app_id):
                        "sure": bool(neg_range) and (neg_range[0] > 50 or neg_range[1] < 50),
                        "negative_recommended": sum(is_positive(reviews[rid]) for rid in group["N"]),
                        "cells": cells,
-                       "examples": {s: [excerpt(reviews[rid], app_id) for rid in sorted_ids(group[s], reviews)[:2]]
+                       "examples": {s: [excerpt(reviews[rid], app_id) for rid in sorted_ids(group[s], reviews)[:4]]
                                     for s in ("P", "N")}})
     # 구간마다 불만으로 가장 많이 나온 주제 둘
     for index, cohort in enumerate(cohorts):
@@ -258,7 +258,10 @@ def build_evidence(directory, app_id):
             vote_periods[key] = {"start": day(min(stamps)), "end": day(max(stamps)), "days": round((max(stamps) - min(stamps)) / 86400) + 1}
     start_gap = (round(abs(min_stamp(reviews, True) - min_stamp(reviews, False)) / 86400)
                  if len(vote_periods) == 2 else None)
-    return {"counts": {"collected": n, "analyzed": len(analyzed), "negative": n - up,
+    # 구체적인 불만인데 주제 목록에 없어 "기타"로 빠진 리뷰. 주제 목록과 매트릭스에는 나오지 않으므로 건수라도 보여 준다.
+    off_list = sum(any(isinstance(p, (list, tuple)) and len(p) == 2 and p[0] == "기타" and p[1] == "N" for p in item.get("t") or [])
+                   for item in analyzed.values())
+    return {"counts": {"collected": n, "analyzed": len(analyzed), "negative": n - up, "off_list_complaints": off_list,
                        "themed": len(themed), "vote_mood": vote_mood,
                        "complaint_reviews": len(complaint_ids),
                        "recommended_complaints": sum(is_positive(reviews[rid]) for rid in complaint_ids),
@@ -288,42 +291,36 @@ def build_evidence(directory, app_id):
 
 # ── 심층 분석: AI를 다시 부르지 않고 이미 저장된 결과만 다시 센다 ──────────────
 EARLY_HOURS = 20
-STOPWORDS = {"게임", "너무", "진짜", "정말", "많이", "조금", "좀", "계속", "자꾸", "때문", "문제", "현상",
-             "발생", "있음", "없음", "있다", "없다", "하는", "되는", "되지", "않음", "않는", "안됨", "경우",
-             "부분", "관련", "상태", "이후", "이상", "그냥", "매우", "가끔", "자주", "일부", "전체", "유저",
-             "플레이", "플레이어", "느낌", "생각", "수준", "정도", "해서", "하고", "으로", "에서"}
-SUFFIXES = ("에서는", "으로는", "에서", "으로", "이나", "까지", "부터", "하고", "해서", "하면", "하는", "되는",
-            "됨", "함", "음", "이", "가", "은", "는", "을", "를", "에", "의", "도", "로", "과", "와", "만")
 REQUEST_MARKS = ("해주", "해 주", "해라", "했으면", "좋겠", "추가", "수정", "개선", "희망", "부탁", "늘려", "줄여",
                  "바꿔", "복구", "지원", "넣어", "고쳐", "상향", "하향", "가능하게", "필요")
 VAGUE = {"버그 수정", "버그 개선", "개선 필요", "최적화 필요", "최적화 개선", "수정 필요", "편의성 개선",
          "버그 개선 희망", "버그 좀 수정해주세요", "고쳐주셨으면 합니다", "개선 부탁"}
 
 
-def is_request(text):
-    """유저가 직접 적은 구체적인 요청인가. 화면의 '유저가 원하는 것'과 AI 요약의 재료가 같은 기준을 쓴다."""
+_FOREIGN = re.compile(r"[À-ɏЀ-ӿ぀-ヿ㐀-鿿]+")
+
+
+def korean_only(text):
+    """AI가 쓴 문구에 섞여 나온 한자·일본어·키릴·악센트 글자를 뺀다('의미不明', '주의但 재미'). 리뷰 원문에는 쓰지 않는다."""
+    return re.sub(r"\s{2,}", " ", _FOREIGN.sub("", str(text or ""))).strip()
+
+
+GENERIC_WORDS = ("개선", "수정", "필요", "기능", "시스템", "관리", "문제", "해결", "패치", "업데이트", "희망", "요망", "부탁", "제발", "빨리",
+                 "해주세요", "해줘", "해라", "좀", "더", "및", "버그", "최적화", "고쳐", "고치", "주세요", "주셨으면", "합니다", "했으면", "좋겠", "잘", "해결", "해주면", "해줬으면", "줬으면", "된다면", "되면",
+                 "갓겜", "게임", "완벽", "될 듯", "될듯", "환불", "것 같습니다", "거 같습니다", "plz")
+
+
+def is_request(text, theme=""):
+    """유저가 직접 적은 구체적인 요청인가. 화면의 '바라는 것'과 요약의 제안이 같은 기준을 쓴다.
+
+    주제 이름에 "개선·수정"만 붙인 말("저장 기능 개선", "서버 개선", "패치좀 해라")은 무엇을 바라는지 알 수 없어 뺀다."""
     text = " ".join((text or "").split())
-    return len(text) >= 6 and text not in VAGUE and any(mark in text for mark in REQUEST_MARKS)
-
-
-# 낱말로 세면 뜻이 없는 것: 꾸미는 말과 이어 주는 말
-DROP_WORDS = {"인한", "대한", "위한", "통한", "관한", "따른", "같은", "있음", "없음", "있는", "없는", "겁나", "엄청", "매우"}
-DROP_ENDINGS = ("는데", "지만", "어서", "아서", "면서", "니까", "려고", "하다", "한다", "된다", "있다", "없다")
-
-
-def words(text):
-    """짧은 한국어 문장을 뜻 있는 낱말로. 형태소 분석기 없이 흔한 조사·어미만 떼어 낸다."""
-    out = set()
-    for w in re.findall(r"[0-9A-Za-z가-힣]+", text or ""):
-        if w in DROP_WORDS or w.endswith(DROP_ENDINGS):
-            continue
-        for suffix in SUFFIXES:
-            if len(w) > len(suffix) + 1 and w.endswith(suffix):
-                w = w[: -len(suffix)]
-                break
-        if len(w) >= 2 and w not in STOPWORDS:
-            out.add(w)
-    return out
+    if not (len(text) >= 6 and text not in VAGUE and any(mark in text for mark in REQUEST_MARKS)):
+        return False
+    rest = text.replace(theme, "") if theme else text
+    for word in GENERIC_WORDS:
+        rest = rest.replace(word, "")
+    return len(re.sub(r"[^0-9A-Za-z가-힣]", "", rest)) >= 3
 
 
 def votes(row):
@@ -337,23 +334,21 @@ def build_deep(reviews, analyzed, members, complaints, app_id, alias=None):
         for p in item.get("p") or []:
             name = analysis_design.resolve(p.get("t"), alias or {}) if isinstance(p, dict) and p.get("t") else None
             if name:
-                parts.setdefault(name, []).append((rid, str(p.get("prob") or ""), str(p.get("why") or ""), str(p.get("fix") or "")))
-    focus = sorted((name for name, g in members.items() if g["N"]),
-                   key=lambda name: (-(len(members[name]["N"]) > len(members[name]["P"])), -len(members[name]["N"])))[:4]
-
-    # ① 불만에서 자주 나온 말: 주제별 불만 문장에서 여러 리뷰가 함께 쓴 낱말
-    causes = []
-    for name in focus:
-        rows = parts.get(name) or []
-        seen, example = {}, {}
-        for rid, prob, why, _ in rows:
-            for w in sorted(words(f"{prob} {why}") - words(name)):
-                seen.setdefault(w, set()).add(rid)
-                example.setdefault(w, prob or why)
-        ranked = sorted(seen.items(), key=lambda kv: (-len(kv[1]), kv[0]))[:6]
-        terms = [{"word": w, "count": len(ids), "example": example[w][:60]}
-                 for w, ids in ranked if len(ids) >= 2]
-        causes.append({"theme": name, "reviews": len({r[0] for r in rows}), "terms": terms})
+                parts.setdefault(name, []).append((rid, korean_only(p.get("prob")), str(p.get("why") or ""), korean_only(p.get("fix"))))
+    # ① 주제별 불만 메모: 리뷰마다 AI가 적어 둔 문제·원인 문장. 낱말로 쪼개 세지 않고 문장 그대로, 도움됨이 많은 리뷰부터.
+    # (낱말로 세던 때는 형태소 분석 없이 조사를 떼다가 "플레이"가 "플레"로 잘려 나왔다.)
+    notes = {}
+    for name, rows in parts.items():
+        if name == "기타":
+            continue
+        seen, picked = set(), []
+        for rid, prob, why, _ in sorted(rows, key=lambda r: -votes(reviews[r[0]]) if r[0] in reviews else 0):
+            key = re.sub(r"\s+", "", prob)
+            if not prob or key in seen or rid not in reviews:
+                continue
+            seen.add(key)
+            picked.append({"prob": prob[:60], "why": why[:80], "votes": votes(reviews[rid])})
+        notes[name] = picked[:4]
 
     # ② 초반 이탈: 20시간 전에 비추천한 리뷰와 그 뒤에 비추천한 리뷰가 불만으로 꼽은 주제
     early, later = Counter(), Counter()
@@ -395,7 +390,7 @@ def build_deep(reviews, analyzed, members, complaints, app_id, alias=None):
     for name, rows in parts.items():
         for rid, _, _, fix in rows:
             text = " ".join(fix.split())
-            if not is_request(text):
+            if not is_request(text, name):
                 continue
             key = re.sub(r"\s+", "", text)
             if (key, rid) in counted_requests:
@@ -404,9 +399,9 @@ def build_deep(reviews, analyzed, members, complaints, app_id, alias=None):
             w = wants.setdefault(key, {"text": text[:60], "theme": name, "count": 0, "votes": 0})
             w["count"] += 1
             w["votes"] += votes(reviews[rid])
-    wants = sorted(wants.values(), key=lambda w: (-w["count"], -w["votes"]))[:8]
+    wants = sorted(wants.values(), key=lambda w: (-w["count"], -w["votes"]))[:40]   # 화면이 주제별로 골라 쓴다
 
-    return {"early_hours": EARLY_HOURS, "has_complaints": bool(complaints), "causes": causes,
+    return {"early_hours": EARLY_HOURS, "has_complaints": bool(complaints), "notes": notes,
             "churn": {"early_n": early_n, "later_n": later_n, "topics": churn_topics},
             "agreed": {"topics": agreed, "total_votes": total_votes, "reviews": top_reviews},
             "wants": wants}

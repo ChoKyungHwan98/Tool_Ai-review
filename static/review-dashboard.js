@@ -11,6 +11,18 @@ window.ReviewDashboard = (() => {
   const num = x => x == null ? '—' : Number(x).toLocaleString('ko-KR');
   const pct = x => x == null ? '—' : `${Number(x).toFixed(1)}%`;
   const clamp = x => Math.max(0, Math.min(100, Number(x) || 0));
+  // 리뷰를 어떻게 모았는지. 설명 문장이 실제 수집 방법과 다르면 안 된다.
+  const scope = d => {
+    const p = d?.sample_design_full?.params || {};
+    if (p.sort === 'random') {
+      return { random: true, bias: '리뷰를 쓴 사람만 담긴다는 치우침',
+        text: (p.random_pool?.complete ? '수집 범위의 리뷰를 끝까지 훑고 그중에서 무작위로 뽑은 리뷰입니다.' : '무작위로 뽑았지만 수집 범위를 끝까지 훑지는 못한 리뷰입니다.')
+          + ' 리뷰는 자발적으로 작성한 의견이어서, 리뷰를 쓰지 않은 유저의 생각까지 대표하지는 않습니다.' };
+    }
+    const label = p.sort === 'helpful' ? '공감순' : '최신순';
+    return { random: false, bias: `${label} 수집의 치우침`,
+      text: `${label}으로 수집한 리뷰입니다. 추천·비추천 비율을 맞춰도 전체 유저나 전체 기간의 무작위 표본이 되지는 않습니다. 리뷰는 자발적으로 작성한 의견입니다.` };
+  };
   // 한 리뷰가 같은 주제에 칭찬과 불만을 모두 달 수 있으므로 감성 언급 수를 분모로 쓴다.
   const themeNegShare = t => t.pos + t.neg ? t.neg / (t.pos + t.neg) : 0;
   const ICONS = {
@@ -160,11 +172,11 @@ window.ReviewDashboard = (() => {
       </div>
       <dialog class="rd-dialog rd-method-dialog" id="rdMethodDialog" aria-labelledby="rdMethodTitle"><div class="rd-dialog-head"><div><h2 id="rdMethodTitle">분석 기준</h2><p>${num(counts.collected)}건 수집 · ${num(counts.analyzed)}건 AI 분석</p></div><button class="rd-btn" data-action="close-method" aria-label="분석 기준 닫기">닫기 ×</button></div><div class="rd-method-grid">
         <p><b>주제별 칭찬과 불만</b><br>한 줄이 주제 하나입니다. 막대 길이는 그 주제를 칭찬(파랑)하거나 불만(보라)으로 언급한 AI 분석 리뷰 수이고, 언급이 많은 주제부터 위에 놓습니다. 오른쪽 숫자는 언급한 리뷰 수와 칭찬·불만 언급 중 불만의 몫입니다.</p>
-        <p><b>"불확실" 표시</b><br>언급이 적으면 리뷰 몇 건에 따라 불만 비율이 50%를 넘기도 하고 못 넘기도 합니다. 이 건수에서 우연으로 흔들릴 수 있는 범위(90%, 주제 줄에 마우스를 올리면 보임)가 50%를 걸치면, 칭찬이 많은지 불만이 많은지 말할 수 없어 "불확실"로 적고 강조하지 않습니다. 건수가 적어 생기는 흔들림만 잰 것이고, 전체 유저의 비율에 대한 신뢰구간이 아닙니다. 최신순 수집의 치우침과 AI 분류 오류는 이 범위에 들어 있지 않습니다.</p>
+        <p><b>"불확실" 표시</b><br>언급이 적으면 리뷰 몇 건에 따라 불만 비율이 50%를 넘기도 하고 못 넘기도 합니다. 이 건수에서 우연으로 흔들릴 수 있는 범위(90%, 주제 줄에 마우스를 올리면 보임)가 50%를 걸치면, 칭찬이 많은지 불만이 많은지 말할 수 없어 "불확실"로 적고 강조하지 않습니다. 건수가 적어 생기는 흔들림만 잰 것이고, 전체 유저의 비율에 대한 신뢰구간이 아닙니다. ${scope(V).bias}과 AI 분류 오류는 이 범위에 들어 있지 않습니다.</p>
         <p><b>IPA 매트릭스</b><br>가로축은 주제를 언급한 리뷰 수, 세로축은 칭찬·불만 언급 중 불만의 몫입니다(중요도–성과 분석, IPA). 한 리뷰에 같은 주제의 칭찬과 불만이 함께 있으면 가로축에는 한 번, 세로축에는 각각 한 번씩 셉니다. 원 크기도 언급 리뷰 수입니다. 세로 점선은 전체 주제의 언급 수 중앙값, 가로 점선은 불만 50%입니다. 언급 수가 네 배 이상 차이 나면 가로축을 로그 눈금으로 그립니다.</p>
         <p><b>진하게 칠한 두 주제</b><br>칭찬이 더 많은 주제 중 칭찬 리뷰가 가장 많은 주제(파랑)와 불만이 더 많은 주제 중 불만 리뷰가 가장 많은 주제(보라)입니다. 살펴보기 시작할 곳을 표시한 것이고, 무엇을 고칠지는 원문을 읽고 사람이 판단합니다.</p>
         <p><b>날짜별 추천 · 비추천</b><br>개요의 차트는 우리가 수집한 리뷰가 아니라 Steam에 올라온 전체 리뷰(모든 언어)를 날짜별로 센 것입니다. 리뷰 수(파란 실선)는 왼쪽 눈금, 비추천 비율(보라 점선)은 오른쪽 눈금으로 읽습니다.</p>
-        <p><b>수집 범위</b><br>최신순으로 수집한 리뷰입니다. 추천·비추천 비율을 맞춰도 전체 유저나 전체 기간의 무작위 표본이 되지는 않습니다. 리뷰는 자발적으로 작성한 의견입니다.</p>
+        <p><b>수집 범위</b><br>${scope(V).text}</p>
         <p><b>표본과 AI 분류</b><br>주제 수치는 AI가 원문을 분류한 결과입니다.${counts.themed != null ? ` 수집 ${num(counts.collected)}건 중 AI가 분석한 글은 ${num(counts.analyzed)}건이고, 그중 주제가 붙은 글은 ${num(counts.themed)}건입니다. 이 화면의 숫자는 그 ${num(counts.themed)}건에서 나옵니다.` : ''} 너무 짧아 제외한 글 ${num(counts.short_excluded ?? (counts.collected - counts.analyzed))}건${counts.analysis_missing_eligible ? `, 분석 대상인데 결과가 없는 글 ${num(counts.analysis_missing_eligible)}건` : ''}은 주제 집계에 포함되지 않습니다. 플레이 시간별 비추천율은 수집 리뷰 전체의 Steam 추천 여부로 계산합니다.${counts.skipped_analysis ? ` 읽을 수 없거나 원문이 없는 분석 ${num(counts.skipped_analysis)}건 제외.` : ''}${evidence.merges?.length ? ` AI가 나눈 주제 중 같은 리뷰에 80% 이상 함께 붙은 ${num(evidence.merges.length)}개는 규칙으로 합쳤습니다(분석 방법 참고).` : ''}</p>
       </div></dialog>
       <dialog class="rd-dialog" id="rdEvidenceDialog" aria-labelledby="rdDialogTitle"><div class="rd-dialog-head"><div><h2 id="rdDialogTitle">리뷰 근거</h2><p id="rdDialogMeta"></p></div><button class="rd-btn" data-action="close-dialog" aria-label="리뷰 근거 닫기">닫기 ×</button></div><div class="rd-toggle" aria-label="주제 감성 선택"><button data-action="evidence-filter" data-sentiment="N">불만</button><button data-action="evidence-filter" data-sentiment="P">칭찬</button><button data-action="evidence-filter" data-sentiment="all">전체</button></div><div id="rdEvidenceBody" aria-live="polite"></div></dialog>`;
@@ -407,8 +419,9 @@ window.ReviewDashboard = (() => {
     const xm = x(median), ym = y(.5);
     const share = themeNegShare;
     // 넓은 화면에서 원만 작게 남지 않도록 차트 폭에 맞춰 키운다(최대 1.6배)
-    const grow = Math.max(1, Math.min(1.3, W / 720));
-    const radius = t => (9 + 18 * Math.sqrt(t.mentions / maxM)) * grow;
+    // 원 넓이가 언급 리뷰 수에 비례한다(반지름 = √건수). 가장 큰 원은 그림 짧은 변의 6%쯤으로 잡아 원끼리 덜 겹치게 한다.
+    const biggest = Math.max(12, Math.min(22, Math.min(pw, ph) * .06));
+    const radius = t => Math.max(4, biggest * Math.sqrt(t.mentions / maxM));
     const dots = topics.map(t => ({t, r: role(t), cx: x(t.mentions), cy: y(share(t)), rad: radius(t)}));
     const hero = r => ['concern','strength','watch'].includes(r);
     // 라벨: 중요한 주제부터 빈 자리에 놓고, 자리가 없으면 생략(마우스를 올리면 이름이 보임)
@@ -417,6 +430,30 @@ window.ReviewDashboard = (() => {
     const hits = (b, edge = W - R) => b.x < L || b.x + b.w > edge || b.y < T || b.y + b.h > H - B + 4
       || boxes.some(o => b.x < o.x + o.w && b.x + b.w > o.x && b.y < o.y + o.h && b.y + b.h > o.y)
       || dots.some(d => { const nx = Math.max(b.x, Math.min(d.cx, b.x + b.w)), ny = Math.max(b.y, Math.min(d.cy, b.y + b.h)); return Math.hypot(d.cx - nx, d.cy - ny) < d.rad + 1; });
+    const order = [...dots].sort((a,b) => hero(b.r) - hero(a.r) || (b.t.name === selected) - (a.t.name === selected) || b.t.mentions - a.t.mentions);
+    const place = (d, nameOnly = false) => {
+      const big = hero(d.r);
+      if (W < 480 && !big) return;
+      const size = big ? 14 : 13, sub = big && !nameOnly ? `${num(d.t.mentions)}건 · 불만 ${Math.round(share(d.t) * 100)}%` : '';
+      const w = Math.max(textW(d.t.name, size), sub ? textW(sub, 13) : 0), h = sub ? 33 : 17;
+      const g = d.rad + (big ? 9 : 5);
+      const k = g * .72;
+      const spots = [[d.cx + g, d.cy - h / 2, 'start'], [d.cx - g - w, d.cy - h / 2, 'end'], [d.cx - w / 2, d.cy - g - h, 'middle'], [d.cx - w / 2, d.cy + g, 'middle'],
+        [d.cx + k, d.cy - k - h, 'start'], [d.cx - k - w, d.cy - k - h, 'end'], [d.cx + k, d.cy + k, 'start'], [d.cx - k - w, d.cy + k, 'end']];
+      let placed = false;
+      for (const [bx, by, anchor] of spots) {
+        const b = {x: bx, y: by, w, h};
+        // 지킬 것·고칠 것 이름은 반드시 보이도록 카드 여백까지 허용
+        if (hits(b, big ? W + 18 : W - R)) continue;
+        boxes.push(b);
+        const tx = anchor === 'start' ? bx : anchor === 'end' ? bx + w : bx + w / 2;
+        placed = true;
+        labels.push(`<text class="rd-dot-label is-${d.r}" data-action="select" data-theme="${esc(d.t.name)}" x="${tx}" y="${by + size - 1}" text-anchor="${anchor}" font-size="${size}">${esc(d.t.name)}</text>${sub ? `<text class="rd-dot-sub" data-action="select" data-theme="${esc(d.t.name)}" x="${tx}" y="${by + size + 15}" text-anchor="${anchor}">${sub}</text>` : ''}`);
+        break;
+      }
+      if (!placed && sub) place(d, true);   // 건수 줄까지 놓을 자리가 없으면 이름만 놓는다
+    };
+    order.filter(d => hero(d.r)).forEach(d => place(d));   // 강조한 주제의 이름이 영역 이름에 자리를 뺏기면 안 된다
     // 네 영역. 오른쪽 = 언급 수 중앙값 이상, 위 = 불만 50% 초과
     const quads = [
       {cls:'is-fix', right:true, top:true}, {cls:'is-keep', right:true, top:false},
@@ -426,7 +463,7 @@ window.ReviewDashboard = (() => {
     // 주제 이름이 그 위에 올라오지 않도록 자리를 맡아 둔다.
     const QUAD_TITLE = {'is-fix': '집중 개선', 'is-keep': '유지 강화', 'is-watch': '낮은 우선순위', 'is-small': '작은 강점'};
     const narrowest = Math.min(...quads.map(q => q.x1 - q.x0));
-    const quadSize = [24, 20, 18, 16].find(size => textW('낮은 우선순위', size) + 16 <= narrowest) || 0;
+    const quadSize = [16, 14].find(size => textW('낮은 우선순위', size) + 16 <= narrowest) || 0;
     const quadLabels = !quadSize ? '' : quads.map(q => {
       const title = QUAD_TITLE[q.cls], w = textW(title, quadSize), h = quadSize + 6, pad = 10;
       const xs = [(q.x0 + q.x1 - w) / 2, q.right ? q.x1 - pad - w : q.x0 + pad, q.right ? q.x0 + pad : q.x1 - pad - w];
@@ -437,26 +474,8 @@ window.ReviewDashboard = (() => {
       boxes.push(box);
       return `<text class="rd-q-label ${q.cls}" x="${box.x + w / 2}" y="${box.y + quadSize}" text-anchor="middle" font-size="${quadSize}">${title}</text>`;
     }).join('');
-    const order = [...dots].sort((a,b) => hero(b.r) - hero(a.r) || (b.t.name === selected) - (a.t.name === selected) || b.t.mentions - a.t.mentions);
-    order.forEach(d => {
-      const big = hero(d.r);
-      if (W < 480 && !big) return;
-      const size = big ? 14 : 13, sub = big ? `${num(d.t.mentions)}건 · 불만 ${Math.round(share(d.t) * 100)}%` : '';
-      const w = Math.max(textW(d.t.name, size), sub ? textW(sub, 13) : 0), h = big ? 33 : 17;
-      const g = d.rad + (big ? 9 : 5);
-      const k = g * .72;
-      const spots = [[d.cx + g, d.cy - h / 2, 'start'], [d.cx - g - w, d.cy - h / 2, 'end'], [d.cx - w / 2, d.cy - g - h, 'middle'], [d.cx - w / 2, d.cy + g, 'middle'],
-        [d.cx + k, d.cy - k - h, 'start'], [d.cx - k - w, d.cy - k - h, 'end'], [d.cx + k, d.cy + k, 'start'], [d.cx - k - w, d.cy + k, 'end']];
-      for (const [bx, by, anchor] of spots) {
-        const b = {x: bx, y: by, w, h};
-        // 지킬 것·고칠 것 이름은 반드시 보이도록 카드 여백까지 허용
-        if (hits(b, big ? W + 18 : W - R)) continue;
-        boxes.push(b);
-        const tx = anchor === 'start' ? bx : anchor === 'end' ? bx + w : bx + w / 2;
-        labels.push(`<text class="rd-dot-label is-${d.r}" data-action="select" data-theme="${esc(d.t.name)}" x="${tx}" y="${by + size - 1}" text-anchor="${anchor}" font-size="${size}">${esc(d.t.name)}</text>${sub ? `<text class="rd-dot-sub" data-action="select" data-theme="${esc(d.t.name)}" x="${tx}" y="${by + size + 15}" text-anchor="${anchor}">${sub}</text>` : ''}`);
-        break;
-      }
-    });
+
+    order.filter(d => !hero(d.r)).forEach(d => place(d));
     const tick = (tx, ty, str, anchor = 'end') => `<text class="rd-map-tick" x="${tx}" y="${ty}" text-anchor="${anchor}">${str}</text>`;
     const axisName = W < 480 ? (logScale ? '언급 수 · 로그 눈금' : `${num(xMax)}건`) : logScale ? '언급 리뷰 수 →' : `언급 리뷰 수 → ${num(xMax)}건`;
     const xGrid = xTicks.map(v => `<line x1="${x(v)}" x2="${x(v)}" y1="${T}" y2="${H - B}" class="rd-map-grid"/>`).join('');
@@ -476,7 +495,7 @@ window.ReviewDashboard = (() => {
       ${quadLabels}
       ${tick(L - 6, T + 4, '100%')}${tick(L - 6, ym + 4, '50%')}${tick(L - 6, H - B + 4, '0%')}
       ${logScale ? xTickText : tick(L, H - 8, '0', 'start')}${tick(xm, H - 8, `중앙값 ${num(Math.round(median))}건`, 'middle')}${tick(W - R, H - 8, axisName, 'end')}
-      ${[...dots].sort((a,b) => (a.t.name === selected || hero(a.r)) - (b.t.name === selected || hero(b.r)) || b.rad - a.rad).map(d => `<g class="rd-dot is-${d.r}" data-action="select" data-theme="${esc(d.t.name)}" tabindex="0" role="button" aria-pressed="${selected === d.t.name}" aria-label="${esc(d.t.name)}: 언급 ${d.t.mentions}건, 불만 ${Math.round(share(d.t) * 100)}%, 칭찬 ${d.t.pos}건, 불만 ${d.t.neg}건"><title>${esc(d.t.name)} · 언급 ${num(d.t.mentions)}건 · 칭찬 ${num(d.t.pos)} · 불만 ${num(d.t.neg)} (${Math.round(share(d.t) * 100)}%)</title>${d.rad < 12 ? `<circle cx="${d.cx}" cy="${d.cy}" r="${d.rad + 6}" class="rd-dot-hit"/>` : ''}${hero(d.r) ? `<circle cx="${d.cx}" cy="${d.cy}" r="${d.rad + 12}" class="rd-dot-halo"/>` : ''}<circle cx="${d.cx}" cy="${d.cy}" r="${d.rad + 6}" class="rd-dot-ring"/><circle cx="${d.cx}" cy="${d.cy}" r="${d.rad}" class="rd-dot-mark"/></g>`).join('')}
+      ${[...dots].sort((a,b) => (a.t.name === selected || hero(a.r)) - (b.t.name === selected || hero(b.r)) || b.rad - a.rad).map(d => `<g class="rd-dot is-${d.r}" data-action="select" data-theme="${esc(d.t.name)}" tabindex="0" role="button" aria-pressed="${selected === d.t.name}" aria-label="${esc(d.t.name)}: 언급 ${d.t.mentions}건, 불만 ${Math.round(share(d.t) * 100)}%, 칭찬 ${d.t.pos}건, 불만 ${d.t.neg}건"><title>${esc(d.t.name)} · 언급 ${num(d.t.mentions)}건 · 칭찬 ${num(d.t.pos)} · 불만 ${num(d.t.neg)} (${Math.round(share(d.t) * 100)}%)</title>${d.rad < 12 ? `<circle cx="${d.cx}" cy="${d.cy}" r="${d.rad + 6}" class="rd-dot-hit"/>` : ''}${hero(d.r) ? `<circle cx="${d.cx}" cy="${d.cy}" r="${d.rad + 8}" class="rd-dot-halo"/>` : ''}<circle cx="${d.cx}" cy="${d.cy}" r="${d.rad + 4}" class="rd-dot-ring"/><circle cx="${d.cx}" cy="${d.cy}" r="${d.rad}" class="rd-dot-mark"/></g>`).join('')}
       <g aria-hidden="true">${labels.join('')}</g>
     </svg>`;
   }
@@ -495,7 +514,7 @@ window.ReviewDashboard = (() => {
           <span class="rd-rank-track"><span style="width:${(t.pos + t.neg) / max * 100}%">${t.pos ? `<i class="pos" style="flex:${t.pos}"></i>` : ''}${t.neg ? `<i class="neg" style="flex:${t.neg}"></i>` : ''}</span></span>
           <span class="rd-rank-count">${num(t.mentions)}건</span>
           <span class="rd-rank-share ${t.neg > t.pos && t.sure !== false ? 'is-neg' : ''}">${t.sure === false ? '<small>불확실</small>' : ''}${share}%</span>
-        </button>`; }).join('')}</div>`;
+        </button>`; }).join('')}</div>${evidence.counts?.off_list_complaints ? `<p class="rd-rank-foot">구체적인 불만인데 위 주제에 들지 않은 리뷰가 ${num(evidence.counts.off_list_complaints)}건 있습니다. 이 불만은 주제 목록과 매트릭스에 나오지 않습니다.</p>` : ''}`;
   }
 
   // 선택 주제: 칭찬/불만 비율, 불만이 나오는 플레이 구간, AI 요약, 실제 리뷰 한 줄
@@ -523,8 +542,7 @@ window.ReviewDashboard = (() => {
     target.className = `rd-pane rd-focus is-${r}`;
     target.innerHTML = `
       <header class="rd-pane-head">
-        <div><h2>선택한 주제 · ${esc(t.name)}</h2><p>${definition ? `${esc(definition)} · ` : ''}칭찬 ${num(t.pos)}건 · 불만 ${num(t.neg)}건${t.neg && t.negative_recommended != null ? ` (불만을 쓴 리뷰 중 ${num(t.negative_recommended)}건은 게임을 추천)` : ''}</p></div>
-        <span class="rd-focus-badge">${label}</span>
+        <div><h2>선택한 주제 · ${esc(t.name)}<span class="rd-focus-badge">${label}</span></h2><p>${definition ? `${esc(definition)} · ` : ''}칭찬 ${num(t.pos)}건 · 불만 ${num(t.neg)}건${t.neg && t.negative_recommended != null ? ` (불만을 쓴 리뷰 중 ${num(t.negative_recommended)}건은 게임을 추천)` : ''}</p></div>
       </header>
       <div class="rd-focus-grid">
         ${when}
@@ -618,6 +636,14 @@ window.ReviewDashboard = (() => {
     else if (action === 'retry-evidence') loadEvidence();
   }
   function closeDialog() { document.getElementById('rdEvidenceDialog').close(); }
+  // 불만 분석에서 한 주제의 리뷰 원문을 연다. 근거 창이 주제별 보기에 있어서 그 화면으로 옮겨 간다.
+  function openTopic(name, sentiment) {
+    if (!themeByName(name)) return;
+    selected = name; updateURL(); renderChart(); renderMap(); renderDetail();
+    document.querySelector('.nav-item[data-page="topics"]')?.click();
+    dialogTheme = name; dialogSentiment = sentiment; dialogPage = 1;
+    document.getElementById('rdEvidenceDialog').showModal(); loadEvidence();
+  }
 
   function closeMethod() { document.getElementById('rdMethodDialog').close(); }
   async function loadEvidence() {
@@ -705,7 +731,7 @@ body { margin:0; background:#F2F4F6; font-family:system-ui,-apple-system,"Segoe 
   <div class="rpt-two">${topicBox(s, 'keep')}${topicBox(c, 'fix')}</div>
   ${deep.length ? `<h2>심층 분석에서 찾은 것</h2><ul class="rpt-lines">${deep.map(([k, t]) => `<li><span>${k}</span><p style="margin:0">${t}</p></li>`).join('')}</ul>` : ''}
   ${design.length ? `<h2>분석 방법 <small>누가 정했나</small></h2><ul class="rpt-lines rpt-design">${design.map(r => `<li><span>${esc(r.step)} · ${esc(r.who)}</span><p style="margin:0">${esc(r.text)}${r.details?.length ? ` — ${r.details.slice(0, 3).map(esc).join(' / ')}` : ''}</p></li>`).join('')}</ul>` : ''}
-  <p class="rpt-foot">최신순으로 모은 Steam 리뷰입니다. 전체 유저의 무작위 표본이 아니므로 "전체 유저의 몇 %"로 읽지 않습니다. 주제·감성은 AI 분류이며 한 리뷰가 여러 주제에 들어갈 수 있습니다. 칭찬 최다·불만 최다 주제는 살펴보기 시작할 곳이며, 무엇을 고칠지는 사람이 판단합니다.</p>
+  <p class="rpt-foot">${scope(data).text} 주제·감성은 AI 분류이며 한 리뷰가 여러 주제에 들어갈 수 있습니다. 칭찬 최다·불만 최다 주제는 살펴보기 시작할 곳이며, 무엇을 고칠지는 사람이 판단합니다.</p>
 </div></body></html>`;
   }
   function report() {
@@ -751,5 +777,5 @@ body { margin:0; background:#F2F4F6; font-family:system-ui,-apple-system,"Segoe 
     if (button) { const t = button.parentElement, open = !t.classList.contains('is-open'); t.classList.toggle('is-open', open); button.setAttribute('aria-expanded', String(open)); }
   });
 
-  return {render, refresh, report, reportHTML, icon, plain, cohorts: renderCohorts, foldNotes};
+  return {render, refresh, report, reportHTML, icon, plain, cohorts: renderCohorts, foldNotes, openTopic};
 })();
